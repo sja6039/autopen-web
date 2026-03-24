@@ -166,6 +166,13 @@ const App: React.FC = () => {
   )
   const [activeRecipientIndex, setActiveRecipientIndex] = useState(0)
 
+  // ── Autopen Pi upload state ───────────────────────────────────────────────
+  const [showAutopenPanel, setShowAutopenPanel] = useState(false)
+  const [autopenCode, setAutopenCode] = useState('')
+  const [autopenCardIndex, setAutopenCardIndex] = useState(0)
+  const [autopenStatus, setAutopenStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [autopenMessage, setAutopenMessage] = useState('')
+
   const visibleRecipients = useMemo(
     () => recipients.slice(0, cardCount),
     [recipients, cardCount],
@@ -227,6 +234,47 @@ const App: React.FC = () => {
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+  }
+
+  const handleAutopenUpload = async () => {
+    if (autopenCode.length !== 6) return
+
+    setAutopenStatus('loading')
+    setAutopenMessage('')
+
+    const svg  = createCardSvg(baseMessage, visibleRecipients[autopenCardIndex], autopenCardIndex)
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+    const file = new File([blob], `card-${autopenCardIndex + 1}.svg`, { type: blob.type })
+
+    const form = new FormData()
+    form.append('code', autopenCode)
+    form.append('file', file)
+
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 15_000)
+
+    try {
+      const res  = await fetch('/api/autopen/upload', { method: 'POST', body: form, signal: controller.signal })
+      const data = await res.json().catch(() => ({}))
+      clearTimeout(timer)
+
+      if (res.ok) {
+        setAutopenStatus('success')
+        setAutopenMessage(data.filename ?? 'Upload successful')
+        setAutopenCode('')
+      } else {
+        setAutopenStatus('error')
+        setAutopenMessage(data.error ?? `Server returned ${res.status}`)
+      }
+    } catch (err: any) {
+      clearTimeout(timer)
+      setAutopenStatus('error')
+      setAutopenMessage(
+        err.name === 'AbortError'
+          ? 'Request timed out — is the Pi reachable?'
+          : 'Could not reach the server.',
+      )
+    }
   }
 
   const currentRecipient = visibleRecipients[activeRecipientIndex]
@@ -517,7 +565,7 @@ const App: React.FC = () => {
                 <div>
                   <h2 className="text-lg font-semibold text-stone-900">Preview & export</h2>
                   <p className="mt-1 text-sm text-stone-500">
-                    {cardCount} card{cardCount !== 1 ? 's' : ''} ready. Download or share as SVG files.
+                    {cardCount} card{cardCount !== 1 ? 's' : ''} ready. Download, share, or send to your Autopen plotter.
                   </p>
                 </div>
                 <Button variant="outline" onClick={() => setStep(3)}>
@@ -538,7 +586,123 @@ const App: React.FC = () => {
                   </svg>
                   Share / Email
                 </Button>
+                <Button
+                  variant={showAutopenPanel ? 'default' : 'outline'}
+                  size="lg"
+                  onClick={() => {
+                    setShowAutopenPanel((p) => !p)
+                    setAutopenStatus('idle')
+                    setAutopenMessage('')
+                  }}
+                >
+                  <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
+                  </svg>
+                  Send to Autopen
+                </Button>
               </div>
+
+              {/* ── Autopen upload panel ── */}
+              {showAutopenPanel && (
+                <div className="mt-5 rounded-xl border border-violet-100 bg-violet-50/50 p-5 space-y-5">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-semibold text-stone-800">Send to Autopen plotter</p>
+                      <p className="text-xs text-stone-500">Enter the pairing code shown on your plotter's screen.</p>
+                    </div>
+                  </div>
+
+                  {/* Pairing code */}
+                  <div>
+                    <label className="text-xs font-bold uppercase tracking-widest text-stone-500 block mb-1.5">
+                      Pairing code <span className="normal-case font-normal tracking-normal text-stone-400">(shown on HMI screen)</span>
+                    </label>
+                    <input
+                      type="tel"
+                      maxLength={6}
+                      placeholder="000000"
+                      value={autopenCode}
+                      onChange={(e) => setAutopenCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                      className="w-full rounded-xl border-2 border-stone-200 bg-white px-4 py-3 text-center text-3xl font-mono tracking-[0.4em] text-stone-900 placeholder:text-stone-300 placeholder:tracking-[0.4em] focus:border-violet-400 focus:outline-none transition-colors"
+                    />
+                  </div>
+
+                  {/* Card selector (only when more than one card) */}
+                  {cardCount > 1 && (
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-widest text-stone-500 block mb-2">
+                        Which card to send
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        {visibleRecipients.map((_, i) => (
+                          <button
+                            key={i}
+                            onClick={() => setAutopenCardIndex(i)}
+                            className={[
+                              'w-10 h-10 rounded-xl text-sm font-semibold transition-all active:scale-95',
+                              autopenCardIndex === i
+                                ? 'bg-violet-600 text-white shadow-sm shadow-violet-200'
+                                : 'bg-white border-2 border-stone-200 text-stone-500 hover:border-violet-300 hover:text-violet-600',
+                            ].join(' ')}
+                          >
+                            {i + 1}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status feedback */}
+                  {autopenStatus === 'success' && (
+                    <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3">
+                      <svg className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-700">Sent successfully</p>
+                        <p className="text-xs text-emerald-600 mt-0.5 font-mono">{autopenMessage}</p>
+                      </div>
+                    </div>
+                  )}
+                  {autopenStatus === 'error' && (
+                    <div className="flex items-start gap-2.5 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+                      <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <p className="text-sm text-red-700">{autopenMessage}</p>
+                    </div>
+                  )}
+
+                  {/* Send button */}
+                  <button
+                    onClick={handleAutopenUpload}
+                    disabled={autopenStatus === 'loading' || autopenCode.length !== 6}
+                    className="w-full h-12 rounded-xl bg-violet-600 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:bg-violet-700 transition-colors shadow-sm shadow-violet-200 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.98]"
+                  >
+                    {autopenStatus === 'loading' ? (
+                      <>
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                        Uploading…
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        Send card {cardCount > 1 ? `${autopenCardIndex + 1} ` : ''}to plotter
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Card grid */}

@@ -7,6 +7,10 @@ export default defineConfig({
   plugins: [tailwindcss()],
   server: {
     host: true,
+    proxy: {
+      // Forward all /api/* requests to the Express backend during dev.
+      '/api': 'http://localhost:3001',
+    },
   },
   resolve: {
     alias: {
