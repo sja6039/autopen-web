@@ -1,8 +1,16 @@
-import React, { useMemo, useState, useEffect } from 'react'
+import React, { useMemo, useState, useEffect, useRef } from 'react'
 import JSZip from 'jszip'
 import { Button } from '@/components/ui/button'
 import type { Drawing } from '@/components/DrawingPad'
 import { DrawingPad, drawingToSvgPath } from '@/components/DrawingPad'
+import {
+  connect,
+  disconnect,
+  getStatus,
+  sendSvgBatch,
+  getConnectedIp,
+  type PiStatus,
+} from '@/services/piConnectionService'
 
 type RecipientEntry = {
   name: Drawing | null
@@ -61,7 +69,7 @@ function createCardSvg(
 
 // ─── Progress bar ────────────────────────────────────────────────────────────
 
-const STEP_LABELS = ['Count', 'Message', 'Names', 'Export']
+const STEP_LABELS = ['Count', 'Message', 'Names', 'Export', 'Print']
 
 function StepProgress({ current }: { current: number }) {
   return (
@@ -155,7 +163,7 @@ const App: React.FC = () => {
     }
   }, [])
 
-  const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
+  const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1)
   const [cardCount, setCardCount] = useState(4)
   const [baseMessage, setBaseMessage] = useState<Drawing | null>(null)
   const [recipients, setRecipients] = useState<RecipientEntry[]>(
@@ -167,12 +175,38 @@ const App: React.FC = () => {
   )
   const [activeRecipientIndex, setActiveRecipientIndex] = useState(0)
 
-  // ── Autopen Pi upload state ───────────────────────────────────────────────
-  const [showAutopenPanel, setShowAutopenPanel] = useState(false)
-  const [autopenCode, setAutopenCode] = useState('')
-  const [autopenCardIndex, setAutopenCardIndex] = useState(0)
-  const [autopenStatus, setAutopenStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
-  const [autopenMessage, setAutopenMessage] = useState('')
+  // ── Pi printer state ──────────────────────────────────────────────────────
+  const [piCode, setPiCode] = useState('')
+  const [piConnectState, setPiConnectState] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle')
+  const [piConnectError, setPiConnectError] = useState('')
+  const [piSendState, setPiSendState] = useState<'idle' | 'sending' | 'done' | 'error'>('idle')
+  const [piSendProgress, setPiSendProgress] = useState({ sent: 0, total: 0 })
+  const [piSendError, setPiSendError] = useState('')
+  const [piStatus, setPiStatus] = useState<PiStatus | null>(null)
+  const piPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+
+  // Poll Pi status while connected
+  useEffect(() => {
+    if (piConnectState === 'connected') {
+      const poll = async () => {
+        try {
+          const s = await getStatus()
+          setPiStatus(s)
+        } catch { /* ignore transient errors */ }
+      }
+      poll()
+      piPollRef.current = setInterval(poll, 3_000)
+    } else {
+      if (piPollRef.current) {
+        clearInterval(piPollRef.current)
+        piPollRef.current = null
+      }
+      setPiStatus(null)
+    }
+    return () => {
+      if (piPollRef.current) clearInterval(piPollRef.current)
+    }
+  }, [piConnectState])
 
   const visibleRecipients = useMemo(
     () => recipients.slice(0, cardCount),
@@ -237,44 +271,60 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url)
   }
 
-  const handleAutopenUpload = async () => {
-    if (autopenCode.length !== 6) return
-
-    setAutopenStatus('loading')
-    setAutopenMessage('')
-
-    const svg  = createCardSvg(baseMessage, visibleRecipients[autopenCardIndex], autopenCardIndex)
-    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
-    const file = new File([blob], `card-${autopenCardIndex + 1}.svg`, { type: blob.type })
-
-    const form = new FormData()
-    form.append('code', autopenCode)
-    form.append('file', file)
-
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 15_000)
-
+  const handlePiConnect = async () => {
+    if (piCode.length !== 6) return
+    setPiConnectState('connecting')
+    setPiConnectError('')
+    setPiSendState('idle')
+    setPiSendError('')
     try {
-      const res  = await fetch('/api/autopen/upload', { method: 'POST', body: form, signal: controller.signal })
-      const data = await res.json().catch(() => ({}))
-      clearTimeout(timer)
-
-      if (res.ok) {
-        setAutopenStatus('success')
-        setAutopenMessage(data.filename ?? 'Upload successful')
-        setAutopenCode('')
-      } else {
-        setAutopenStatus('error')
-        setAutopenMessage(data.error ?? `Server returned ${res.status}`)
-      }
+      await connect(piCode)
+      setPiConnectState('connected')
     } catch (err: any) {
-      clearTimeout(timer)
-      setAutopenStatus('error')
-      setAutopenMessage(
-        err.name === 'AbortError'
-          ? 'Request timed out — is the Pi reachable?'
-          : 'Could not reach the server.',
-      )
+      setPiConnectState('error')
+      setPiConnectError(err.message ?? 'Could not reach the printer')
+    }
+  }
+
+  const handlePiDisconnect = () => {
+    disconnect()
+    setPiConnectState('idle')
+    setPiConnectError('')
+    setPiCode('')
+    setPiSendState('idle')
+    setPiSendProgress({ sent: 0, total: 0 })
+    setPiSendError('')
+  }
+
+  const handlePiSendAll = async () => {
+    setPiSendState('sending')
+    setPiSendError('')
+    setPiSendProgress({ sent: 0, total: visibleRecipients.length })
+    const now = new Date()
+    const ts =
+      now.getFullYear().toString() +
+      String(now.getMonth() + 1).padStart(2, '0') +
+      String(now.getDate()).padStart(2, '0') +
+      '_' +
+      String(now.getHours()).padStart(2, '0') +
+      String(now.getMinutes()).padStart(2, '0') +
+      String(now.getSeconds()).padStart(2, '0')
+    const cards = visibleRecipients.map((recipient, i) => ({
+      filename: `card_${ts}_${String(i + 1).padStart(2, '0')}.svg`,
+      svgString: createCardSvg(baseMessage, recipient, i),
+    }))
+    try {
+      await sendSvgBatch(cards, (sent, total) => {
+        setPiSendProgress({ sent, total })
+      })
+      setPiSendState('done')
+    } catch (err: any) {
+      setPiSendState('error')
+      setPiSendError(err.message ?? 'Send failed')
+    } finally {
+      disconnect()
+      setPiConnectState('idle')
+      setPiCode('')
     }
   }
 
@@ -298,7 +348,7 @@ const App: React.FC = () => {
             </div>
           </div>
           <div className="text-xs font-semibold text-stone-400 bg-stone-100 px-3 py-1.5 rounded-full">
-            Step {step} of 4
+            Step {step} of 5
           </div>
         </div>
       </header>
@@ -566,7 +616,7 @@ const App: React.FC = () => {
                 <div>
                   <h2 className="text-lg font-semibold text-stone-900">Preview & export</h2>
                   <p className="mt-1 text-sm text-stone-500">
-                    {cardCount} card{cardCount !== 1 ? 's' : ''} ready. Download, share, or send to your Autopen plotter.
+                    {cardCount} card{cardCount !== 1 ? 's' : ''} ready. Download or share before sending to the printer.
                   </p>
                 </div>
                 <Button variant="outline" onClick={() => setStep(3)}>
@@ -587,123 +637,13 @@ const App: React.FC = () => {
                   </svg>
                   Share / Email
                 </Button>
-                <Button
-                  variant={showAutopenPanel ? 'default' : 'outline'}
-                  size="lg"
-                  onClick={() => {
-                    setShowAutopenPanel((p) => !p)
-                    setAutopenStatus('idle')
-                    setAutopenMessage('')
-                  }}
-                >
+                <Button size="lg" onClick={() => setStep(5)}>
                   <svg className="w-4 h-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
                   </svg>
-                  Send to Autopen
+                  Send to Printer →
                 </Button>
               </div>
-
-              {/* ── Autopen upload panel ── */}
-              {showAutopenPanel && (
-                <div className="mt-5 rounded-xl border border-violet-100 bg-violet-50/50 p-5 space-y-5">
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-lg bg-violet-600 flex items-center justify-center flex-shrink-0">
-                      <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4m0 0h18" />
-                      </svg>
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-stone-800">Send to Autopen plotter</p>
-                      <p className="text-xs text-stone-500">Enter the pairing code shown on your plotter's screen.</p>
-                    </div>
-                  </div>
-
-                  {/* Pairing code */}
-                  <div>
-                    <label className="text-xs font-bold uppercase tracking-widest text-stone-500 block mb-1.5">
-                      Pairing code <span className="normal-case font-normal tracking-normal text-stone-400">(shown on HMI screen)</span>
-                    </label>
-                    <input
-                      type="tel"
-                      maxLength={6}
-                      placeholder="000000"
-                      value={autopenCode}
-                      onChange={(e) => setAutopenCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                      className="w-full rounded-xl border-2 border-stone-200 bg-white px-4 py-3 text-center text-3xl font-mono tracking-[0.4em] text-stone-900 placeholder:text-stone-300 placeholder:tracking-[0.4em] focus:border-violet-400 focus:outline-none transition-colors"
-                    />
-                  </div>
-
-                  {/* Card selector (only when more than one card) */}
-                  {cardCount > 1 && (
-                    <div>
-                      <label className="text-xs font-bold uppercase tracking-widest text-stone-500 block mb-2">
-                        Which card to send
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {visibleRecipients.map((_, i) => (
-                          <button
-                            key={i}
-                            onClick={() => setAutopenCardIndex(i)}
-                            className={[
-                              'w-10 h-10 rounded-xl text-sm font-semibold transition-all active:scale-95',
-                              autopenCardIndex === i
-                                ? 'bg-violet-600 text-white shadow-sm shadow-violet-200'
-                                : 'bg-white border-2 border-stone-200 text-stone-500 hover:border-violet-300 hover:text-violet-600',
-                            ].join(' ')}
-                          >
-                            {i + 1}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Status feedback */}
-                  {autopenStatus === 'success' && (
-                    <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3">
-                      <svg className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-                      </svg>
-                      <div>
-                        <p className="text-sm font-semibold text-emerald-700">Sent successfully</p>
-                        <p className="text-xs text-emerald-600 mt-0.5 font-mono">{autopenMessage}</p>
-                      </div>
-                    </div>
-                  )}
-                  {autopenStatus === 'error' && (
-                    <div className="flex items-start gap-2.5 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
-                      <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      <p className="text-sm text-red-700">{autopenMessage}</p>
-                    </div>
-                  )}
-
-                  {/* Send button */}
-                  <button
-                    onClick={handleAutopenUpload}
-                    disabled={autopenStatus === 'loading' || autopenCode.length !== 6}
-                    className="w-full h-12 rounded-xl bg-violet-600 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:bg-violet-700 transition-colors shadow-sm shadow-violet-200 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.98]"
-                  >
-                    {autopenStatus === 'loading' ? (
-                      <>
-                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
-                        </svg>
-                        Uploading…
-                      </>
-                    ) : (
-                      <>
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                        </svg>
-                        Send card {cardCount > 1 ? `${autopenCardIndex + 1} ` : ''}to plotter
-                      </>
-                    )}
-                  </button>
-                </div>
-              )}
             </div>
 
             {/* Card grid */}
@@ -764,6 +704,249 @@ const App: React.FC = () => {
                 )
               })}
             </div>
+          </div>
+        )}
+
+        {/* ── Step 5: Send to Printer ── */}
+        {step === 5 && (
+          <div className="space-y-4">
+            {/* Connection panel */}
+            <div className="bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
+              <div className="px-6 pt-6 pb-4 border-b border-stone-50 flex items-start justify-between gap-4">
+                <div>
+                  <h2 className="text-lg font-semibold text-stone-900">Send to Printer</h2>
+                  <p className="mt-1 text-sm text-stone-500">
+                    Enter the 6-character pairing code shown on your plotter's screen.
+                  </p>
+                </div>
+                <Button variant="outline" onClick={() => setStep(4)}>
+                  ← Back
+                </Button>
+              </div>
+
+              <div className="px-6 py-5 space-y-5">
+                {/* Code input + connect */}
+                {piConnectState !== 'connected' ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="text-xs font-bold uppercase tracking-widest text-stone-500 block mb-1.5">
+                        Pairing code
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="text"
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        maxLength={6}
+                        placeholder="a1B2c3"
+                        value={piCode}
+                        onChange={(e) =>
+                          setPiCode(
+                            e.target.value
+                              .replace(/[^0-9a-zA-Z]/g, '')
+                              .slice(0, 6),
+                          )
+                        }
+                        className="w-full rounded-xl border-2 border-stone-200 bg-white px-4 py-3 text-center text-3xl font-mono tracking-[0.4em] text-stone-900 placeholder:text-stone-300 placeholder:tracking-[0.4em] focus:border-violet-400 focus:outline-none transition-colors"
+                      />
+                    </div>
+
+                    {piSendState === 'done' && (
+                      <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3">
+                        <svg className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                        </svg>
+                        <div>
+                          <p className="text-sm font-semibold text-emerald-700">All {piSendProgress.total} cards sent</p>
+                          <p className="text-xs text-emerald-600 mt-0.5">Enter a new code to connect again.</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {piSendState === 'error' && (
+                      <div className="flex items-start gap-2.5 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+                        <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <div>
+                          <p className="text-sm font-semibold text-red-700">Send failed — disconnected</p>
+                          <p className="text-xs text-red-600 mt-0.5">{piSendError}</p>
+                        </div>
+                      </div>
+                    )}
+
+                    {piConnectState === 'error' && (
+                      <div className="flex items-start gap-2.5 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+                        <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        <p className="text-sm text-red-700">{piConnectError}</p>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handlePiConnect}
+                      disabled={piConnectState === 'connecting' || piCode.length !== 6}
+                      className="w-full h-12 rounded-xl bg-violet-600 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:bg-violet-700 transition-colors shadow-sm shadow-violet-200 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.98]"
+                    >
+                      {piConnectState === 'connecting' ? (
+                        <>
+                          <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                          </svg>
+                          Connecting…
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                          </svg>
+                          Connect
+                        </>
+                      )}
+                    </button>
+                  </div>
+                ) : (
+                  /* Connected state */
+                  <div className="space-y-4">
+                    {/* Connection badge */}
+                    <div className="flex items-center justify-between rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <div>
+                          <p className="text-sm font-semibold text-emerald-700">Connected</p>
+                          <p className="text-xs text-emerald-600 font-mono">{getConnectedIp()}:5000</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={handlePiDisconnect}
+                        className="text-xs font-semibold text-stone-400 hover:text-red-500 transition-colors"
+                      >
+                        Disconnect
+                      </button>
+                    </div>
+
+                    {/* Live status */}
+                    {piStatus && (
+                      <div className="rounded-xl border border-stone-100 bg-stone-50 px-4 py-3 space-y-1.5">
+                        <p className="text-xs font-bold uppercase tracking-widest text-stone-400">Printer status</p>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={[
+                              'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold',
+                              piStatus.status === 'idle'
+                                ? 'bg-stone-100 text-stone-500'
+                                : piStatus.status === 'plotting'
+                                  ? 'bg-violet-100 text-violet-700'
+                                  : 'bg-amber-100 text-amber-700',
+                            ].join(' ')}
+                          >
+                            {piStatus.status}
+                          </span>
+                          {piStatus.current_job && (
+                            <span className="text-xs text-stone-500 font-mono truncate">{piStatus.current_job}</span>
+                          )}
+                        </div>
+                        <div className="flex gap-4 text-xs text-stone-500">
+                          <span>Queue: <strong className="text-stone-700">{piStatus.queue.length}</strong></span>
+                          <span>Done: <strong className="text-stone-700">{piStatus.completed.length}</strong></span>
+                          <span>Total received: <strong className="text-stone-700">{piStatus.total_received}</strong></span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Send panel — only shown once connected */}
+            {piConnectState === 'connected' && (
+              <div className="bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
+                <div className="px-6 pt-6 pb-4 border-b border-stone-50">
+                  <h3 className="text-base font-semibold text-stone-900">Send cards</h3>
+                  <p className="mt-1 text-sm text-stone-500">
+                    {cardCount} card{cardCount !== 1 ? 's' : ''} will be sent one by one to the printer queue.
+                  </p>
+                </div>
+
+                <div className="px-6 py-5 space-y-4">
+                  {/* Progress bar */}
+                  {piSendState === 'sending' && (
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-xs font-medium text-stone-500">
+                        <span>Sending card {piSendProgress.sent + 1} of {piSendProgress.total}…</span>
+                        <span>{Math.round((piSendProgress.sent / piSendProgress.total) * 100)}%</span>
+                      </div>
+                      <div className="h-2 w-full rounded-full bg-stone-100 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-violet-600 transition-all duration-300"
+                          style={{ width: `${(piSendProgress.sent / piSendProgress.total) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Done summary */}
+                  {piSendState === 'done' && (
+                    <div className="flex items-start gap-2.5 rounded-xl bg-emerald-50 border border-emerald-200 px-4 py-3">
+                      <svg className="w-4 h-4 text-emerald-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-semibold text-emerald-700">All {piSendProgress.total} cards sent</p>
+                        <p className="text-xs text-emerald-600 mt-0.5">The printer is processing the queue.</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Error */}
+                  {piSendState === 'error' && (
+                    <div className="flex items-start gap-2.5 rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+                      <svg className="w-4 h-4 text-red-500 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-semibold text-red-700">Send failed</p>
+                        <p className="text-xs text-red-600 mt-0.5">{piSendError}</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Send / Retry button */}
+                  <button
+                    onClick={handlePiSendAll}
+                    disabled={piSendState === 'sending'}
+                    className="w-full h-12 rounded-xl bg-violet-600 text-white font-semibold text-sm flex items-center justify-center gap-2 hover:bg-violet-700 transition-colors shadow-sm shadow-violet-200 disabled:opacity-40 disabled:pointer-events-none active:scale-[0.98]"
+                  >
+                    {piSendState === 'sending' ? (
+                      <>
+                        <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+                        </svg>
+                        Sending…
+                      </>
+                    ) : piSendState === 'done' ? (
+                      <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                        Send again
+                      </>
+                    ) : (
+                      <>
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                        </svg>
+                        Send {cardCount} card{cardCount !== 1 ? 's' : ''} to printer
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </main>
