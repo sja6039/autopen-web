@@ -10,8 +10,9 @@ type RecipientEntry = {
 }
 
 const MAX_CARDS = 50
-const CARD_WIDTH = 1000
-const CARD_HEIGHT = 700
+// 100 internal units = 1 inch → SVG outputs at exactly 5.5 × 4.3 in
+const CARD_WIDTH = 550
+const CARD_HEIGHT = 430
 const CARD_MARGIN_X = CARD_WIDTH * 0.08
 const CARD_MARGIN_Y = CARD_HEIGHT * 0.08
 const CARD_INNER_W = CARD_WIDTH - CARD_MARGIN_X * 2
@@ -51,7 +52,7 @@ function createCardSvg(
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${CARD_WIDTH}" height="${CARD_HEIGHT}" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" data-card-index="${index}">`,
+    `<svg xmlns="http://www.w3.org/2000/svg" width="5.5in" height="4.3in" viewBox="0 0 ${CARD_WIDTH} ${CARD_HEIGHT}" data-card-index="${index}">`,
     `<rect width="100%" height="100%" fill="white" />`,
     ...parts,
     `</svg>`,
