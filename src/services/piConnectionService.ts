@@ -1,49 +1,37 @@
-// Base-62 charset for pairing-code decoding
-const CHARSET = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-const PORT = 5000
+let _tunnelUrl: string | null = null
 
-let _ip: string | null = null
-
-// Decode a 6-char base-62 code → IPv4 string.
-// Encoding scheme: IP (32 bits) left-shifted 4, with 4 random low bits appended.
-// Decoding: convert to integer, right-shift 4 to drop the random nibble, interpret as IPv4.
-function decodeIp(code: string): string {
-  let n = 0
-  for (const ch of code) {
-    const idx = CHARSET.indexOf(ch)
-    if (idx === -1) throw new Error(`Invalid character in pairing code: "${ch}"`)
-    n = n * 62 + idx
-  }
-  // Drop random nibble (low 4 bits)
-  n = n % (2 ** 32)
-  // Extract IPv4 octets using unsigned right-shift
-  const a = (n >>> 24) & 0xff
-  const b = (n >>> 16) & 0xff
-  const c = (n >>> 8) & 0xff
-  const d = n & 0xff
-  return `${a}.${b}.${c}.${d}`
-}
-
-function base(ip: string): string {
-  return `http://${ip}:${PORT}`
+/** Look up the Cloudflare tunnel URL for a 6-char code via ntfy.sh. */
+async function lookupTunnelUrl(code: string): Promise<string> {
+  const res = await fetch(`https://ntfy.sh/autopen_${code}/json?poll=1&since=10m`, {
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) throw new Error(`ntfy.sh returned HTTP ${res.status}`)
+  const text = await res.text()
+  const lines = text.trim().split('\n').filter(Boolean)
+  if (lines.length === 0) throw new Error('Code not found')
+  const last = JSON.parse(lines[lines.length - 1])
+  const url: string = last?.message ?? ''
+  if (!url.startsWith('https://')) throw new Error('Code not found')
+  return url
 }
 
 function connectedBase(): string {
-  if (!_ip) throw new Error('Not connected to a printer')
-  return base(_ip)
+  if (!_tunnelUrl) throw new Error('Not connected to a printer')
+  return _tunnelUrl
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-/** Decode the pairing code, ping the Pi's health endpoint, and store the IP. */
+/** Look up the tunnel URL from ntfy.sh, ping the Pi's health endpoint, and store the URL. */
 export async function connect(code: string): Promise<string> {
-  const ip = decodeIp(code)
-  const res = await fetch(`${base(ip)}/api/health`, {
+  if (code.length !== 6) throw new Error('Pairing code must be 6 characters')
+  const tunnelUrl = await lookupTunnelUrl(code)
+  const res = await fetch(`${tunnelUrl}/api/health`, {
     signal: AbortSignal.timeout(8_000),
   })
   if (!res.ok) throw new Error(`Printer returned HTTP ${res.status}`)
-  _ip = ip
-  return ip
+  _tunnelUrl = tunnelUrl
+  return tunnelUrl
 }
 
 /** Ping the currently connected Pi. Returns true if reachable. */
@@ -60,12 +48,12 @@ export async function ping(): Promise<boolean> {
 
 /** Clear the stored connection. */
 export function disconnect(): void {
-  _ip = null
+  _tunnelUrl = null
 }
 
-/** Return the connected IP, or null if not connected. */
+/** Return the connected tunnel URL, or null if not connected. */
 export function getConnectedIp(): string | null {
-  return _ip
+  return _tunnelUrl
 }
 
 export interface PiStatus {
