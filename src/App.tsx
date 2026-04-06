@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react'
 import JSZip from 'jszip'
 import { Button } from '@/components/ui/button'
 import type { Drawing } from '@/components/DrawingPad'
-import { DrawingPad, drawingToSvgPath } from '@/components/DrawingPad'
+import { DrawingPad, drawingToSvg } from '@/components/DrawingPad'
 import {
   connect,
   disconnect,
@@ -37,26 +37,23 @@ function createCardSvg(
   recipient: RecipientEntry,
   index: number,
 ): string {
-  const namePath = drawingToSvgPath(recipient.name)
-  const specialPath = drawingToSvgPath(recipient.specialMessage)
-  const messagePath = drawingToSvgPath(baseMessage)
-
-  const scaleSection = (
-    raw: string | null,
+  const placeSection = (
+    drawing: Drawing | null,
     ox: number,
     oy: number,
     w: number,
     h: number,
   ) => {
-    if (!raw) return ''
-    const strokeW = 1 / Math.max(w, h)
-    return `<g transform="translate(${ox},${oy}) scale(${w},${h})"><path d="${raw}" fill="none" stroke="black" stroke-width="${strokeW}" stroke-linecap="round" stroke-linejoin="round" /></g>`
+    const result = drawingToSvg(drawing)
+    if (!result) return ''
+    const { path, width: cw, height: ch } = result
+    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="0 0 ${cw} ${ch}" preserveAspectRatio="xMidYMid meet"><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`
   }
 
   const parts: string[] = []
-  parts.push(scaleSection(namePath, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H))
-  parts.push(scaleSection(specialPath, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H))
-  parts.push(scaleSection(messagePath, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H))
+  parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H))
+  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H))
+  parts.push(placeSection(baseMessage, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H))
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
@@ -649,9 +646,9 @@ const App: React.FC = () => {
             {/* Card grid */}
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2">
               {visibleRecipients.map((recipient, i) => {
-                const svgPathName = drawingToSvgPath(recipient.name)
-                const svgPathMessage = drawingToSvgPath(baseMessage)
-                const svgPathSpecial = drawingToSvgPath(recipient.specialMessage)
+                const svgName = drawingToSvg(recipient.name)
+                const svgMessage = drawingToSvg(baseMessage)
+                const svgSpecial = drawingToSvg(recipient.specialMessage)
 
                 return (
                   <div key={i} className="bg-white rounded-2xl border border-stone-100 shadow-sm overflow-hidden">
@@ -682,20 +679,20 @@ const App: React.FC = () => {
                             width={CARD_INNER_W} height={CARD_INNER_H}
                             fill="none" stroke="#e7e5e4" strokeWidth="6" strokeDasharray="20 14"
                           />
-                          {svgPathName && (
-                            <g transform={`translate(${CARD_MARGIN_X}, ${NAME_TOP}) scale(${CARD_INNER_W}, ${NAME_H})`}>
-                              <path d={svgPathName} fill="none" stroke="#1c1917" strokeWidth={1 / Math.max(CARD_INNER_W, NAME_H)} strokeLinecap="round" strokeLinejoin="round" />
-                            </g>
+                          {svgName && (
+                            <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMidYMid meet">
+                              <path d={svgName.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
                           )}
-                          {svgPathSpecial && (
-                            <g transform={`translate(${CARD_MARGIN_X}, ${SPECIAL_TOP}) scale(${CARD_INNER_W}, ${SPECIAL_H})`}>
-                              <path d={svgPathSpecial} fill="none" stroke="#1c1917" strokeWidth={1 / Math.max(CARD_INNER_W, SPECIAL_H)} strokeLinecap="round" strokeLinejoin="round" />
-                            </g>
+                          {svgSpecial && (
+                            <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMidYMid meet">
+                              <path d={svgSpecial.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
                           )}
-                          {svgPathMessage && (
-                            <g transform={`translate(${CARD_MARGIN_X}, ${MESSAGE_TOP}) scale(${CARD_INNER_W}, ${MESSAGE_H})`}>
-                              <path d={svgPathMessage} fill="none" stroke="#1c1917" strokeWidth={1 / Math.max(CARD_INNER_W, MESSAGE_H)} strokeLinecap="round" strokeLinejoin="round" />
-                            </g>
+                          {svgMessage && (
+                            <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMidYMid meet">
+                              <path d={svgMessage.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                            </svg>
                           )}
                         </svg>
                       </div>

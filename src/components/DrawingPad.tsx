@@ -6,6 +6,8 @@ export type Stroke = Point[]
 
 export interface Drawing {
   strokes: Stroke[]
+  canvasWidth?: number
+  canvasHeight?: number
 }
 
 interface DrawingPadProps {
@@ -25,6 +27,26 @@ export function drawingToSvgPath(drawing: Drawing | null): string | null {
     for (const p of rest) segments.push(`L ${p.x} ${p.y}`)
   }
   return segments.join(' ')
+}
+
+/** Returns the SVG path string scaled to canvas pixel coords, plus the canvas dimensions.
+ *  Use this with a nested <svg viewBox="0 0 width height" preserveAspectRatio="xMidYMid meet">
+ *  so the drawing renders at its natural proportions without stretching. */
+export function drawingToSvg(
+  drawing: Drawing | null,
+): { path: string; width: number; height: number } | null {
+  if (!drawing || drawing.strokes.length === 0) return null
+  const w = drawing.canvasWidth ?? 1
+  const h = drawing.canvasHeight ?? 1
+  const segments: string[] = []
+  for (const stroke of drawing.strokes) {
+    if (stroke.length === 0) continue
+    const [first, ...rest] = stroke
+    segments.push(`M ${+(first.x * w).toFixed(3)} ${+(first.y * h).toFixed(3)}`)
+    for (const p of rest)
+      segments.push(`L ${+(p.x * w).toFixed(3)} ${+(p.y * h).toFixed(3)}`)
+  }
+  return { path: segments.join(' '), width: w, height: h }
 }
 
 export const DrawingPad: React.FC<DrawingPadProps> = ({
@@ -114,7 +136,8 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
       if (stroke && stroke.length >= 2) {
         const next = [...strokesRef.current, stroke]
         strokesRef.current = next
-        onChangeRef.current({ strokes: next })
+        const r = canvas.getBoundingClientRect()
+        onChangeRef.current({ strokes: next, canvasWidth: r.width, canvasHeight: r.height })
       }
       setTick((n) => n + 1)
     }
