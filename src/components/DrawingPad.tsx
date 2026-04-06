@@ -2,7 +2,7 @@ import React, { useRef, useEffect, useState } from 'react'
 
 type Point = { x: number; y: number }
 
-export type Stroke = Point[]
+export type Stroke = { points: Point[]; erase?: boolean }
 
 export interface Drawing {
   strokes: Stroke[]
@@ -21,12 +21,14 @@ export function drawingToSvgPath(drawing: Drawing | null): string | null {
   if (!drawing || drawing.strokes.length === 0) return null
   const segments: string[] = []
   for (const stroke of drawing.strokes) {
-    if (stroke.length === 0) continue
-    const [first, ...rest] = stroke
+    if (stroke.erase) continue
+    const { points } = stroke
+    if (points.length === 0) continue
+    const [first, ...rest] = points
     segments.push(`M ${first.x} ${first.y}`)
     for (const p of rest) segments.push(`L ${p.x} ${p.y}`)
   }
-  return segments.join(' ')
+  return segments.length > 0 ? segments.join(' ') : null
 }
 
 /** Returns the SVG path string scaled to canvas pixel coords, plus the canvas dimensions.
@@ -40,12 +42,15 @@ export function drawingToSvg(
   const h = drawing.canvasHeight ?? 1
   const segments: string[] = []
   for (const stroke of drawing.strokes) {
-    if (stroke.length === 0) continue
-    const [first, ...rest] = stroke
+    if (stroke.erase) continue
+    const { points } = stroke
+    if (points.length === 0) continue
+    const [first, ...rest] = points
     segments.push(`M ${+(first.x * w).toFixed(3)} ${+(first.y * h).toFixed(3)}`)
     for (const p of rest)
       segments.push(`L ${+(p.x * w).toFixed(3)} ${+(p.y * h).toFixed(3)}`)
   }
+  if (segments.length === 0) return null
   return { path: segments.join(' '), width: w, height: h }
 }
 
@@ -59,9 +64,10 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
 
   // All mutable drawing state lives in refs so native event handlers
   // (which close over these refs once at mount) always see fresh values.
-  const activePointerRef = useRef<number | null>(null)
-  const currentStrokeRef = useRef<Stroke | null>(null)
-  const strokesRef      = useRef<Stroke[]>(value?.strokes ?? [])
+  const activePointerRef  = useRef<number | null>(null)
+  const currentStrokeRef  = useRef<Stroke | null>(null)
+  const strokesRef        = useRef<Stroke[]>(value?.strokes ?? [])
+  const isErasingRef      = useRef(false)
 
   // Keep onChange in a ref so the event-handler effect never needs to re-run
   // when the parent re-renders with a new callback reference.
@@ -72,9 +78,17 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
   const [tick, setTick] = useState(0)
   const bump = () => setTick((n) => n + 1)
 
+  // Eraser toggle (React state so the button re-renders)
+  const [isErasing, setIsErasing] = useState(false)
+  const toggleEraser = () => {
+    const next = !isErasingRef.current
+    isErasingRef.current = next
+    setIsErasing(next)
+  }
+
   // ── Sync external value into refs ──────────────────────────────────────────
   useEffect(() => {
-    strokesRef.current      = value?.strokes ?? []
+    strokesRef.current       = value?.strokes ?? []
     currentStrokeRef.current = null
     activePointerRef.current = null
     bump()
@@ -93,18 +107,28 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
     canvas.height = rect.height * dpr
     ctx.scale(dpr, dpr)
     ctx.clearRect(0, 0, rect.width, rect.height)
-    ctx.lineCap     = 'round'
-    ctx.lineJoin    = 'round'
-    ctx.strokeStyle = '#1c1917'
-    ctx.lineWidth   = 2
+    ctx.lineCap  = 'round'
+    ctx.lineJoin = 'round'
 
     const paint = (stroke: Stroke) => {
-      if (stroke.length < 2) return
+      const { points, erase } = stroke
+      if (points.length < 2) return
+      ctx.save()
+      if (erase) {
+        ctx.globalCompositeOperation = 'destination-out'
+        ctx.strokeStyle = 'rgba(0,0,0,1)'
+        ctx.lineWidth   = 24
+      } else {
+        ctx.globalCompositeOperation = 'source-over'
+        ctx.strokeStyle = '#1c1917'
+        ctx.lineWidth   = 2
+      }
       ctx.beginPath()
-      ctx.moveTo(stroke[0].x * rect.width, stroke[0].y * rect.height)
-      for (let i = 1; i < stroke.length; i++)
-        ctx.lineTo(stroke[i].x * rect.width, stroke[i].y * rect.height)
+      ctx.moveTo(points[0].x * rect.width, points[0].y * rect.height)
+      for (let i = 1; i < points.length; i++)
+        ctx.lineTo(points[i].x * rect.width, points[i].y * rect.height)
       ctx.stroke()
+      ctx.restore()
     }
 
     strokesRef.current.forEach(paint)
@@ -133,7 +157,7 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
     const commit = () => {
       const stroke = currentStrokeRef.current
       currentStrokeRef.current = null
-      if (stroke && stroke.length >= 2) {
+      if (stroke && stroke.points.length >= 2) {
         const next = [...strokesRef.current, stroke]
         strokesRef.current = next
         const r = canvas.getBoundingClientRect()
@@ -161,7 +185,7 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
 
       const p = pt(e)
       if (!p) return
-      currentStrokeRef.current = [p]
+      currentStrokeRef.current = { points: [p], erase: isErasingRef.current }
       setTick((n) => n + 1)
     }
 
@@ -178,7 +202,8 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
       for (const ce of events) {
         const p = pt(ce)
         if (!p) continue
-        currentStrokeRef.current = [...(currentStrokeRef.current ?? []), p]
+        const cur = currentStrokeRef.current
+        if (cur) currentStrokeRef.current = { ...cur, points: [...cur.points, p] }
       }
       setTick((n) => n + 1)
     }
@@ -247,7 +272,7 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
 
   // ── Clear ───────────────────────────────────────────────────────────────────
   const handleClear = () => {
-    strokesRef.current      = []
+    strokesRef.current       = []
     currentStrokeRef.current = null
     activePointerRef.current = null
     onChangeRef.current(null)
@@ -283,7 +308,7 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
               display: 'block',
               width: '100%',
               height: `${height}px`,
-              cursor: 'crosshair',
+              cursor: isErasing ? 'cell' : 'crosshair',
               touchAction: 'none',
               userSelect: 'none',
               WebkitUserSelect: 'none',
@@ -294,7 +319,20 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
       </div>
 
       <div className="mt-2 flex justify-between items-center px-1">
-        <span className="text-xs text-stone-400">Apple Pencil · palm ignored</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-stone-400">Apple Pencil · palm ignored</span>
+          <button
+            type="button"
+            onClick={toggleEraser}
+            className={`text-xs font-medium px-2 py-1 rounded-lg transition-colors ${
+              isErasing
+                ? 'bg-stone-800 text-white'
+                : 'text-stone-400 hover:text-stone-700 hover:bg-stone-100'
+            }`}
+          >
+            {isErasing ? 'Erasing' : 'Eraser'}
+          </button>
+        </div>
         <button
           type="button"
           onClick={handleClear}
