@@ -44,21 +44,22 @@ function createCardSvg(
     w: number,
     h: number,
     maskId: string,
+    par: string,
   ) => {
     const result = drawingToSvg(drawing)
     if (!result) return ''
     const { path, erasePath, width: cw, height: ch, maskX, maskY, maskW, maskH } = result
     const viewBox = `0 0 ${cw} ${ch}`
     if (erasePath) {
-      return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="xMinYMin meet"><defs><mask id="${maskId}"><rect x="${maskX}" y="${maskY}" width="${maskW}" height="${maskH}" fill="white"/><path d="${erasePath}" fill="none" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/></mask></defs><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" mask="url(#${maskId})" /></svg>`
+      return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="${par}"><defs><mask id="${maskId}"><rect x="${maskX}" y="${maskY}" width="${maskW}" height="${maskH}" fill="white"/><path d="${erasePath}" fill="none" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/></mask></defs><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" mask="url(#${maskId})" /></svg>`
     }
-    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="xMinYMin meet"><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`
+    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="${par}"><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`
   }
 
   const parts: string[] = []
-  parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H, `nm${index}`))
-  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`))
-  parts.push(placeSection(baseMessage, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H, `bm${index}`))
+  parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H, `nm${index}`, 'xMinYMin meet'))
+  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`, 'xMinYMin meet'))
+  parts.push(placeSection(baseMessage, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H, `bm${index}`, 'xMidYMid meet'))
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
@@ -697,7 +698,7 @@ const App: React.FC = () => {
                             </svg>
                           )}
                           {svgMessage && (
-                            <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMinYMin meet">
+                            <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMidYMid meet">
                               {svgMessage.erasePath && <defs><mask id={`pbm${i}`}><rect x={svgMessage.maskX} y={svgMessage.maskY} width={svgMessage.maskW} height={svgMessage.maskH} fill="white"/><path d={svgMessage.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
                               <path d={svgMessage.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={svgMessage.erasePath ? `url(#pbm${i})` : undefined} />
                             </svg>
