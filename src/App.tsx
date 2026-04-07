@@ -48,17 +48,25 @@ function createCardSvg(
   ) => {
     const result = drawingToSvg(drawing)
     if (!result) return ''
-    const { path, erasePath, width: cw, height: ch, maskX, maskY, maskW, maskH } = result
+    const { groups, width: cw, height: ch } = result
     const viewBox = `0 0 ${cw} ${ch}`
-    if (erasePath) {
-      return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="${par}"><defs><mask id="${maskId}"><rect x="${maskX}" y="${maskY}" width="${maskW}" height="${maskH}" fill="white"/><path d="${erasePath}" fill="none" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/></mask></defs><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" mask="url(#${maskId})" /></svg>`
-    }
-    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="${par}"><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`
+    const defs = groups
+      .filter(g => g.erasePath)
+      .map((g, gi) => `<mask id="${maskId}_${gi}"><rect x="0" y="0" width="${cw}" height="${ch}" fill="white"/><path d="${g.erasePath}" fill="none" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/></mask>`)
+    let eraseIndex = 0
+    const paths = groups.map(g => {
+      if (g.erasePath) {
+        return `<path d="${g.path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" mask="url(#${maskId}_${eraseIndex++})" />`
+      }
+      return `<path d="${g.path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />`
+    })
+    const defsStr = defs.length > 0 ? `<defs>${defs.join('')}</defs>` : ''
+    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="${par}">${defsStr}${paths.join('')}</svg>`
   }
 
   const parts: string[] = []
-  parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H, `nm${index}`, 'xMinYMin meet'))
-  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`, 'xMinYMin meet'))
+  parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H, `nm${index}`, 'none'))
+  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`, 'none'))
   parts.push(placeSection(baseMessage, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H, `bm${index}`, 'xMidYMid meet'))
 
   return [
@@ -685,24 +693,33 @@ const App: React.FC = () => {
                             width={CARD_INNER_W} height={CARD_INNER_H}
                             fill="none" stroke="#e7e5e4" strokeWidth="6" strokeDasharray="20 14"
                           />
-                          {svgName && (
-                            <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMinYMin meet">
-                              {svgName.erasePath && <defs><mask id={`pnm${i}`}><rect x={svgName.maskX} y={svgName.maskY} width={svgName.maskW} height={svgName.maskH} fill="white"/><path d={svgName.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
-                              <path d={svgName.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={svgName.erasePath ? `url(#pnm${i})` : undefined} />
-                            </svg>
-                          )}
-                          {svgSpecial && (
-                            <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMinYMin meet">
-                              {svgSpecial.erasePath && <defs><mask id={`psm${i}`}><rect x={svgSpecial.maskX} y={svgSpecial.maskY} width={svgSpecial.maskW} height={svgSpecial.maskH} fill="white"/><path d={svgSpecial.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
-                              <path d={svgSpecial.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={svgSpecial.erasePath ? `url(#psm${i})` : undefined} />
-                            </svg>
-                          )}
-                          {svgMessage && (
-                            <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMidYMid meet">
-                              {svgMessage.erasePath && <defs><mask id={`pbm${i}`}><rect x={svgMessage.maskX} y={svgMessage.maskY} width={svgMessage.maskW} height={svgMessage.maskH} fill="white"/><path d={svgMessage.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
-                              <path d={svgMessage.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={svgMessage.erasePath ? `url(#pbm${i})` : undefined} />
-                            </svg>
-                          )}
+                          {svgName && (() => {
+                            let ei = 0
+                            return (
+                              <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="none">
+                                {svgName.groups.some(g => g.erasePath) && <defs>{svgName.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`pnm${i}_${gi}`}><rect x={0} y={0} width={svgName.width} height={svgName.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
+                                {svgName.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#pnm${i}_${ei++})` : undefined} />)}
+                              </svg>
+                            )
+                          })()}
+                          {svgSpecial && (() => {
+                            let ei = 0
+                            return (
+                              <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="none">
+                                {svgSpecial.groups.some(g => g.erasePath) && <defs>{svgSpecial.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`psm${i}_${gi}`}><rect x={0} y={0} width={svgSpecial.width} height={svgSpecial.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
+                                {svgSpecial.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#psm${i}_${ei++})` : undefined} />)}
+                              </svg>
+                            )
+                          })()}
+                          {svgMessage && (() => {
+                            let ei = 0
+                            return (
+                              <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMidYMid meet">
+                                {svgMessage.groups.some(g => g.erasePath) && <defs>{svgMessage.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`pbm${i}_${gi}`}><rect x={0} y={0} width={svgMessage.width} height={svgMessage.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
+                                {svgMessage.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#pbm${i}_${ei++})` : undefined} />)}
+                              </svg>
+                            )
+                          })()}
                         </svg>
                       </div>
                     </div>

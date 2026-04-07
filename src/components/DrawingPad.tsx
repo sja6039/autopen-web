@@ -31,63 +31,62 @@ export function drawingToSvgPath(drawing: Drawing | null): string | null {
   return segments.length > 0 ? segments.join(' ') : null
 }
 
-/** Returns SVG path strings for drawn and erase strokes, cropped to the tight bounding box
- *  of the drawn content and shifted so the viewport always starts at (0, 0).
- *  Use with viewBox="0 0 width height" and preserveAspectRatio="xMinYMin meet". */
+/** A draw group: strokes drawn together, optionally followed by erase strokes.
+ *  The erase only applies to the draws within this group, not to later draws. */
+export type SvgGroup = { path: string; erasePath: string | null }
+
+/** Returns groups of draw+erase strokes in full canvas coordinates, preserving temporal order.
+ *  Each group's erase mask only cuts through its own draw strokes, so strokes drawn after
+ *  an erase are never affected by that erase. viewBox is always "0 0 width height". */
 export function drawingToSvg(
   drawing: Drawing | null,
-): { path: string; erasePath: string | null; width: number; height: number; maskX: number; maskY: number; maskW: number; maskH: number } | null {
+): { groups: SvgGroup[]; width: number; height: number } | null {
   if (!drawing || drawing.strokes.length === 0) return null
   const w = drawing.canvasWidth ?? 1
   const h = drawing.canvasHeight ?? 1
 
-  // First pass: compute tight bounding box from draw strokes only
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  const strokeToSegments = (strokes: Stroke[]): string => {
+    const segs: string[] = []
+    for (const { points } of strokes) {
+      if (points.length === 0) continue
+      const [first, ...rest] = points
+      segs.push(`M ${+(first.x * w).toFixed(3)} ${+(first.y * h).toFixed(3)}`)
+      for (const p of rest)
+        segs.push(`L ${+(p.x * w).toFixed(3)} ${+(p.y * h).toFixed(3)}`)
+    }
+    return segs.join(' ')
+  }
+
+  const groups: SvgGroup[] = []
+  let currentDraws: Stroke[] = []
+  let currentErases: Stroke[] = []
+  let hasAnyDraw = false
+
   for (const stroke of drawing.strokes) {
-    if (stroke.erase) continue
-    for (const p of stroke.points) {
-      const px = p.x * w
-      const py = p.y * h
-      if (px < minX) minX = px
-      if (py < minY) minY = py
-      if (px > maxX) maxX = px
-      if (py > maxY) maxY = py
+    if (stroke.erase) {
+      currentErases.push(stroke)
+    } else {
+      // Switching from erase back to draw: finalize the previous group
+      if (currentErases.length > 0 && currentDraws.length > 0) {
+        groups.push({ path: strokeToSegments(currentDraws), erasePath: strokeToSegments(currentErases) })
+        currentDraws = []
+        currentErases = []
+      }
+      currentDraws.push(stroke)
+      hasAnyDraw = true
     }
   }
 
-  if (minX === Infinity) return null // only erase strokes, nothing drawn
-
-  // Bounding box with padding, clamped to canvas
-  const pad = 2
-  const ox = Math.max(0, minX - pad)
-  const oy = Math.max(0, minY - pad)
-  const bw = Math.min(w, maxX + pad) - ox
-  const bh = Math.min(h, maxY + pad) - oy
-
-  // Second pass: generate paths shifted so (ox, oy) becomes (0, 0)
-  const drawSegments: string[] = []
-  const eraseSegments: string[] = []
-  for (const stroke of drawing.strokes) {
-    const { points, erase } = stroke
-    if (points.length === 0) continue
-    const segments = erase ? eraseSegments : drawSegments
-    const [first, ...rest] = points
-    segments.push(`M ${+(first.x * w - ox).toFixed(3)} ${+(first.y * h - oy).toFixed(3)}`)
-    for (const p of rest)
-      segments.push(`L ${+(p.x * w - ox).toFixed(3)} ${+(p.y * h - oy).toFixed(3)}`)
+  if (currentDraws.length > 0) {
+    groups.push({
+      path: strokeToSegments(currentDraws),
+      erasePath: currentErases.length > 0 ? strokeToSegments(currentErases) : null,
+    })
   }
 
-  return {
-    path: drawSegments.join(' '),
-    erasePath: eraseSegments.length > 0 ? eraseSegments.join(' ') : null,
-    width: bw > 0 ? bw : w,
-    height: bh > 0 ? bh : h,
-    // Mask rect in shifted coords covers the full canvas extent
-    maskX: -ox,
-    maskY: -oy,
-    maskW: w,
-    maskH: h,
-  }
+  if (!hasAnyDraw) return null
+
+  return { groups, width: w, height: h }
 }
 
 export const DrawingPad: React.FC<DrawingPadProps> = ({
