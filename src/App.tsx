@@ -47,12 +47,12 @@ function createCardSvg(
   ) => {
     const result = drawingToSvg(drawing)
     if (!result) return ''
-    const { path, erasePath, width: cw, height: ch, viewX, viewY, canvasWidth, canvasHeight } = result
-    const viewBox = `${viewX} ${viewY} ${cw} ${ch}`
+    const { path, erasePath, width: cw, height: ch, maskX, maskY, maskW, maskH } = result
+    const viewBox = `0 0 ${cw} ${ch}`
     if (erasePath) {
-      return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="xMidYMid meet"><defs><mask id="${maskId}"><rect x="0" y="0" width="${canvasWidth}" height="${canvasHeight}" fill="white"/><path d="${erasePath}" fill="none" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/></mask></defs><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" mask="url(#${maskId})" /></svg>`
+      return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="xMinYMin meet"><defs><mask id="${maskId}"><rect x="${maskX}" y="${maskY}" width="${maskW}" height="${maskH}" fill="white"/><path d="${erasePath}" fill="none" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/></mask></defs><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" mask="url(#${maskId})" /></svg>`
     }
-    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="xMidYMid meet"><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`
+    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="xMinYMin meet"><path d="${path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" /></svg>`
   }
 
   const parts: string[] = []
@@ -685,20 +685,20 @@ const App: React.FC = () => {
                             fill="none" stroke="#e7e5e4" strokeWidth="6" strokeDasharray="20 14"
                           />
                           {svgName && (
-                            <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`${svgName.viewX} ${svgName.viewY} ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMidYMid meet">
-                              {svgName.erasePath && <defs><mask id={`pnm${i}`}><rect x={0} y={0} width={svgName.canvasWidth} height={svgName.canvasHeight} fill="white"/><path d={svgName.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
+                            <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMinYMin meet">
+                              {svgName.erasePath && <defs><mask id={`pnm${i}`}><rect x={svgName.maskX} y={svgName.maskY} width={svgName.maskW} height={svgName.maskH} fill="white"/><path d={svgName.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
                               <path d={svgName.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={svgName.erasePath ? `url(#pnm${i})` : undefined} />
                             </svg>
                           )}
                           {svgSpecial && (
-                            <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`${svgSpecial.viewX} ${svgSpecial.viewY} ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMidYMid meet">
-                              {svgSpecial.erasePath && <defs><mask id={`psm${i}`}><rect x={0} y={0} width={svgSpecial.canvasWidth} height={svgSpecial.canvasHeight} fill="white"/><path d={svgSpecial.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
+                            <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMinYMin meet">
+                              {svgSpecial.erasePath && <defs><mask id={`psm${i}`}><rect x={svgSpecial.maskX} y={svgSpecial.maskY} width={svgSpecial.maskW} height={svgSpecial.maskH} fill="white"/><path d={svgSpecial.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
                               <path d={svgSpecial.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={svgSpecial.erasePath ? `url(#psm${i})` : undefined} />
                             </svg>
                           )}
                           {svgMessage && (
-                            <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`${svgMessage.viewX} ${svgMessage.viewY} ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMidYMid meet">
-                              {svgMessage.erasePath && <defs><mask id={`pbm${i}`}><rect x={0} y={0} width={svgMessage.canvasWidth} height={svgMessage.canvasHeight} fill="white"/><path d={svgMessage.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
+                            <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMinYMin meet">
+                              {svgMessage.erasePath && <defs><mask id={`pbm${i}`}><rect x={svgMessage.maskX} y={svgMessage.maskY} width={svgMessage.maskW} height={svgMessage.maskH} fill="white"/><path d={svgMessage.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask></defs>}
                               <path d={svgMessage.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={svgMessage.erasePath ? `url(#pbm${i})` : undefined} />
                             </svg>
                           )}

@@ -31,65 +31,62 @@ export function drawingToSvgPath(drawing: Drawing | null): string | null {
   return segments.length > 0 ? segments.join(' ') : null
 }
 
-/** Returns the SVG path string scaled to canvas pixel coords, plus a tight bounding box
- *  around the drawn content and any erase strokes for masking.
- *  Use with a nested <svg viewBox="${viewX} ${viewY} ${width} ${height}" preserveAspectRatio="xMidYMid meet">
- *  so the drawing renders tightly cropped at its natural proportions without stretching. */
+/** Returns SVG path strings for drawn and erase strokes, cropped to the tight bounding box
+ *  of the drawn content and shifted so the viewport always starts at (0, 0).
+ *  Use with viewBox="0 0 width height" and preserveAspectRatio="xMinYMin meet". */
 export function drawingToSvg(
   drawing: Drawing | null,
-): { path: string; erasePath: string | null; width: number; height: number; viewX: number; viewY: number; canvasWidth: number; canvasHeight: number } | null {
+): { path: string; erasePath: string | null; width: number; height: number; maskX: number; maskY: number; maskW: number; maskH: number } | null {
   if (!drawing || drawing.strokes.length === 0) return null
   const w = drawing.canvasWidth ?? 1
   const h = drawing.canvasHeight ?? 1
+
+  // First pass: compute tight bounding box from draw strokes only
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const stroke of drawing.strokes) {
+    if (stroke.erase) continue
+    for (const p of stroke.points) {
+      const px = p.x * w
+      const py = p.y * h
+      if (px < minX) minX = px
+      if (py < minY) minY = py
+      if (px > maxX) maxX = px
+      if (py > maxY) maxY = py
+    }
+  }
+
+  if (minX === Infinity) return null // only erase strokes, nothing drawn
+
+  // Bounding box with padding, clamped to canvas
+  const pad = 2
+  const ox = Math.max(0, minX - pad)
+  const oy = Math.max(0, minY - pad)
+  const bw = Math.min(w, maxX + pad) - ox
+  const bh = Math.min(h, maxY + pad) - oy
+
+  // Second pass: generate paths shifted so (ox, oy) becomes (0, 0)
   const drawSegments: string[] = []
   const eraseSegments: string[] = []
-  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-
   for (const stroke of drawing.strokes) {
     const { points, erase } = stroke
     if (points.length === 0) continue
     const segments = erase ? eraseSegments : drawSegments
     const [first, ...rest] = points
-    const fx = +(first.x * w).toFixed(3)
-    const fy = +(first.y * h).toFixed(3)
-    segments.push(`M ${fx} ${fy}`)
-    if (!erase) {
-      if (fx < minX) minX = fx
-      if (fy < minY) minY = fy
-      if (fx > maxX) maxX = fx
-      if (fy > maxY) maxY = fy
-    }
-    for (const p of rest) {
-      const px = +(p.x * w).toFixed(3)
-      const py = +(p.y * h).toFixed(3)
-      segments.push(`L ${px} ${py}`)
-      if (!erase) {
-        if (px < minX) minX = px
-        if (py < minY) minY = py
-        if (px > maxX) maxX = px
-        if (py > maxY) maxY = py
-      }
-    }
+    segments.push(`M ${+(first.x * w - ox).toFixed(3)} ${+(first.y * h - oy).toFixed(3)}`)
+    for (const p of rest)
+      segments.push(`L ${+(p.x * w - ox).toFixed(3)} ${+(p.y * h - oy).toFixed(3)}`)
   }
-
-  if (drawSegments.length === 0) return null
-
-  // Tight bounding box with a little padding for stroke edges
-  const pad = 2
-  const viewX = Math.max(0, minX - pad)
-  const viewY = Math.max(0, minY - pad)
-  const viewW = Math.min(w, maxX + pad) - viewX
-  const viewH = Math.min(h, maxY + pad) - viewY
 
   return {
     path: drawSegments.join(' '),
     erasePath: eraseSegments.length > 0 ? eraseSegments.join(' ') : null,
-    width: viewW > 0 ? viewW : w,
-    height: viewH > 0 ? viewH : h,
-    viewX,
-    viewY,
-    canvasWidth: w,
-    canvasHeight: h,
+    width: bw > 0 ? bw : w,
+    height: bh > 0 ? bh : h,
+    // Mask rect in shifted coords covers the full canvas extent
+    maskX: -ox,
+    maskY: -oy,
+    maskW: w,
+    maskH: h,
   }
 }
 
