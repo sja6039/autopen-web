@@ -24,7 +24,6 @@ const CARD_HEIGHT = 430
 const CARD_MARGIN_X = CARD_WIDTH * 0.08
 const CARD_MARGIN_Y = CARD_HEIGHT * 0.08
 const CARD_INNER_W = CARD_WIDTH - CARD_MARGIN_X * 2
-const CARD_INNER_H = CARD_HEIGHT - CARD_MARGIN_Y * 2
 const NAME_TOP = CARD_MARGIN_Y
 // NAME_H and SPECIAL_H are sized so their canvas→card scale matches the
 // main message: 220px canvas / NAME_H ≈ 300px canvas / MESSAGE_H
