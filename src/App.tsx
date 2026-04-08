@@ -65,8 +65,8 @@ function createCardSvg(
   }
 
   const parts: string[] = []
-  parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H, `nm${index}`, 'none'))
-  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`, 'none'))
+  parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H, `nm${index}`, 'xMidYMid meet'))
+  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`, 'xMidYMid meet'))
   parts.push(placeSection(baseMessage, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H, `bm${index}`, 'xMidYMid meet'))
 
   return [
@@ -696,7 +696,7 @@ const App: React.FC = () => {
                           {svgName && (() => {
                             let ei = 0
                             return (
-                              <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="none">
+                              <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMidYMid meet">
                                 {svgName.groups.some(g => g.erasePath) && <defs>{svgName.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`pnm${i}_${gi}`}><rect x={0} y={0} width={svgName.width} height={svgName.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
                                 {svgName.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#pnm${i}_${ei++})` : undefined} />)}
                               </svg>
@@ -705,7 +705,7 @@ const App: React.FC = () => {
                           {svgSpecial && (() => {
                             let ei = 0
                             return (
-                              <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="none">
+                              <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMidYMid meet">
                                 {svgSpecial.groups.some(g => g.erasePath) && <defs>{svgSpecial.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`psm${i}_${gi}`}><rect x={0} y={0} width={svgSpecial.width} height={svgSpecial.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
                                 {svgSpecial.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#psm${i}_${ei++})` : undefined} />)}
                               </svg>
