@@ -68,8 +68,8 @@ function createCardSvg(
 
   const parts: string[] = []
   parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H, `nm${index}`, 'xMinYMin meet'))
-  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`, 'xMinYMin meet'))
-  parts.push(placeSection(baseMessage, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H, `bm${index}`, 'xMinYMin meet'))
+  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`, 'xMidYMid meet'))
+  parts.push(placeSection(baseMessage, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H, `bm${index}`, 'xMidYMid meet'))
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
@@ -504,8 +504,10 @@ const App: React.FC = () => {
               </p>
             </div>
 
-            <div className="px-6 py-5">
+            <div className="px-6 pt-5 pb-2">
               <SectionLabel>Main message</SectionLabel>
+            </div>
+            <div className="pb-5">
               <DrawingPad
                 value={baseMessage}
                 onChange={setBaseMessage}
@@ -577,24 +579,28 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="px-6 py-5 space-y-6">
-              <div>
-                <SectionLabel>Name</SectionLabel>
-                <DrawingPad
-                  value={currentRecipient?.name ?? null}
-                  height={220}
-                  onChange={(drawing) => {
-                    setRecipients((prev) => {
-                      const next = [...prev]
-                      next[activeRecipientIndex] = { ...next[activeRecipientIndex], name: drawing }
-                      return next
-                    })
-                  }}
-                />
-              </div>
+            {/* Name — padded, left-aligned on card */}
+            <div className="px-6 pt-5 pb-5">
+              <SectionLabel>Name</SectionLabel>
+              <DrawingPad
+                value={currentRecipient?.name ?? null}
+                height={220}
+                onChange={(drawing) => {
+                  setRecipients((prev) => {
+                    const next = [...prev]
+                    next[activeRecipientIndex] = { ...next[activeRecipientIndex], name: drawing }
+                    return next
+                  })
+                }}
+              />
+            </div>
 
-              <div>
+            {/* Special note — full-width canvas, centered on card */}
+            <div className="border-t border-stone-50">
+              <div className="px-6 pt-5 pb-2">
                 <SectionLabel>Special note <span className="normal-case font-normal text-stone-300">(optional)</span></SectionLabel>
+              </div>
+              <div className="pb-5">
                 <DrawingPad
                   value={currentRecipient?.specialMessage ?? null}
                   height={220}
@@ -698,7 +704,7 @@ const App: React.FC = () => {
                           {svgName && (() => {
                             let ei = 0
                             return (
-                              <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMinYMin meet">
+                              <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMinYMin meet">{/* name: top-left */}
                                 {svgName.groups.some(g => g.erasePath) && <defs>{svgName.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`pnm${i}_${gi}`}><rect x={0} y={0} width={svgName.width} height={svgName.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
                                 {svgName.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#pnm${i}_${ei++})` : undefined} />)}
                               </svg>
@@ -707,7 +713,7 @@ const App: React.FC = () => {
                           {svgSpecial && (() => {
                             let ei = 0
                             return (
-                              <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMinYMin meet">
+                              <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMidYMid meet">
                                 {svgSpecial.groups.some(g => g.erasePath) && <defs>{svgSpecial.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`psm${i}_${gi}`}><rect x={0} y={0} width={svgSpecial.width} height={svgSpecial.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
                                 {svgSpecial.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#psm${i}_${ei++})` : undefined} />)}
                               </svg>
@@ -716,7 +722,7 @@ const App: React.FC = () => {
                           {svgMessage && (() => {
                             let ei = 0
                             return (
-                              <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMinYMin meet">
+                              <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMidYMid meet">
                                 {svgMessage.groups.some(g => g.erasePath) && <defs>{svgMessage.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`pbm${i}_${gi}`}><rect x={0} y={0} width={svgMessage.width} height={svgMessage.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
                                 {svgMessage.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#pbm${i}_${ei++})` : undefined} />)}
                               </svg>
