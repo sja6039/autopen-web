@@ -716,11 +716,6 @@ const App: React.FC = () => {
                       <div className="relative w-full overflow-hidden rounded-xl border border-stone-100 bg-stone-50">
                         <svg viewBox={`0 0 ${CARD_WIDTH} ${CARD_HEIGHT}`} className="block h-44 w-full">
                           <rect width="100%" height="100%" fill="white" />
-                          <rect
-                            x={CARD_MARGIN_X} y={CARD_MARGIN_Y}
-                            width={CARD_INNER_W} height={CARD_INNER_H}
-                            fill="none" stroke="#e7e5e4" strokeWidth="6" strokeDasharray="20 14"
-                          />
                           {svgName && (() => {
                             let ei = 0
                             return (
