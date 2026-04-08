@@ -28,11 +28,17 @@ const CARD_INNER_H = CARD_HEIGHT - CARD_MARGIN_Y * 2
 const NAME_TOP = CARD_MARGIN_Y
 // NAME_H and SPECIAL_H are sized so their canvas→card scale matches the
 // main message: 220px canvas / NAME_H ≈ 300px canvas / MESSAGE_H
-const NAME_H = CARD_HEIGHT * 0.2345   // ≈ 101 units  (was 0.14 / 60)
+const NAME_H = CARD_HEIGHT * 0.2345   // ≈ 101 units
 const SPECIAL_TOP = NAME_TOP + NAME_H + CARD_HEIGHT * 0.02
 const SPECIAL_H = CARD_HEIGHT * 0.2345
 const MESSAGE_TOP = SPECIAL_TOP + SPECIAL_H + CARD_HEIGHT * 0.02
 const MESSAGE_H = CARD_HEIGHT * 0.32
+
+// Render each drawing section at DRAW_SCALE× its logical slot size so that
+// handwriting appears larger on the final card.  The outer card SVG clips any
+// overflow at the card boundary.  Centered sections stay centered; the name
+// section (top-left) expands rightward from the left margin.
+const DRAW_SCALE = 1.5
 
 function createCardSvg(
   baseMessage: Drawing | null,
@@ -66,10 +72,24 @@ function createCardSvg(
     return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="${par}">${defsStr}${paths.join('')}</svg>`
   }
 
+  // Scale each section up by DRAW_SCALE.
+  // Centered sections (xMidYMid): shift x and y so the section center is
+  // preserved — the scaled box extends equally in all directions.
+  // Name section (xMinYMin): expand rightward/downward from the left margin.
+  const scaledW  = CARD_INNER_W * DRAW_SCALE
+  const scaledNH = NAME_H       * DRAW_SCALE
+  const scaledSH = SPECIAL_H    * DRAW_SCALE
+  const scaledMH = MESSAGE_H    * DRAW_SCALE
+  // Horizontal offset that keeps the center of a scaled section at card center
+  const cxOff = CARD_MARGIN_X - CARD_INNER_W * (DRAW_SCALE - 1) / 2
+
   const parts: string[] = []
-  parts.push(placeSection(recipient.name, CARD_MARGIN_X, NAME_TOP, CARD_INNER_W, NAME_H, `nm${index}`, 'xMinYMin meet'))
-  parts.push(placeSection(recipient.specialMessage, CARD_MARGIN_X, SPECIAL_TOP, CARD_INNER_W, SPECIAL_H, `sm${index}`, 'xMidYMid meet'))
-  parts.push(placeSection(baseMessage, CARD_MARGIN_X, MESSAGE_TOP, CARD_INNER_W, MESSAGE_H, `bm${index}`, 'xMidYMid meet'))
+  parts.push(placeSection(recipient.name,
+    CARD_MARGIN_X, NAME_TOP, scaledW, scaledNH, `nm${index}`, 'xMinYMin meet'))
+  parts.push(placeSection(recipient.specialMessage,
+    cxOff, SPECIAL_TOP - SPECIAL_H * (DRAW_SCALE - 1) / 2, scaledW, scaledSH, `sm${index}`, 'xMidYMid meet'))
+  parts.push(placeSection(baseMessage,
+    cxOff, MESSAGE_TOP - MESSAGE_H * (DRAW_SCALE - 1) / 2, scaledW, scaledMH, `bm${index}`, 'xMidYMid meet'))
 
   return [
     `<?xml version="1.0" encoding="UTF-8"?>`,
@@ -704,7 +724,7 @@ const App: React.FC = () => {
                           {svgName && (() => {
                             let ei = 0
                             return (
-                              <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W} height={NAME_H} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMinYMin meet">{/* name: top-left */}
+                              <svg x={CARD_MARGIN_X} y={NAME_TOP} width={CARD_INNER_W * DRAW_SCALE} height={NAME_H * DRAW_SCALE} viewBox={`0 0 ${svgName.width} ${svgName.height}`} preserveAspectRatio="xMinYMin meet">
                                 {svgName.groups.some(g => g.erasePath) && <defs>{svgName.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`pnm${i}_${gi}`}><rect x={0} y={0} width={svgName.width} height={svgName.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
                                 {svgName.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#pnm${i}_${ei++})` : undefined} />)}
                               </svg>
@@ -713,7 +733,7 @@ const App: React.FC = () => {
                           {svgSpecial && (() => {
                             let ei = 0
                             return (
-                              <svg x={CARD_MARGIN_X} y={SPECIAL_TOP} width={CARD_INNER_W} height={SPECIAL_H} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMidYMid meet">
+                              <svg x={CARD_MARGIN_X - CARD_INNER_W * (DRAW_SCALE - 1) / 2} y={SPECIAL_TOP - SPECIAL_H * (DRAW_SCALE - 1) / 2} width={CARD_INNER_W * DRAW_SCALE} height={SPECIAL_H * DRAW_SCALE} viewBox={`0 0 ${svgSpecial.width} ${svgSpecial.height}`} preserveAspectRatio="xMidYMid meet">
                                 {svgSpecial.groups.some(g => g.erasePath) && <defs>{svgSpecial.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`psm${i}_${gi}`}><rect x={0} y={0} width={svgSpecial.width} height={svgSpecial.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
                                 {svgSpecial.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#psm${i}_${ei++})` : undefined} />)}
                               </svg>
@@ -722,7 +742,7 @@ const App: React.FC = () => {
                           {svgMessage && (() => {
                             let ei = 0
                             return (
-                              <svg x={CARD_MARGIN_X} y={MESSAGE_TOP} width={CARD_INNER_W} height={MESSAGE_H} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMidYMid meet">
+                              <svg x={CARD_MARGIN_X - CARD_INNER_W * (DRAW_SCALE - 1) / 2} y={MESSAGE_TOP - MESSAGE_H * (DRAW_SCALE - 1) / 2} width={CARD_INNER_W * DRAW_SCALE} height={MESSAGE_H * DRAW_SCALE} viewBox={`0 0 ${svgMessage.width} ${svgMessage.height}`} preserveAspectRatio="xMidYMid meet">
                                 {svgMessage.groups.some(g => g.erasePath) && <defs>{svgMessage.groups.map((g, gi) => g.erasePath ? <mask key={gi} id={`pbm${i}_${gi}`}><rect x={0} y={0} width={svgMessage.width} height={svgMessage.height} fill="white"/><path d={g.erasePath} fill="none" stroke="black" strokeWidth={24} strokeLinecap="round" strokeLinejoin="round"/></mask> : null)}</defs>}
                                 {svgMessage.groups.map((g, gi) => <path key={gi} d={g.path} fill="none" stroke="#1c1917" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" mask={g.erasePath ? `url(#pbm${i}_${ei++})` : undefined} />)}
                               </svg>
