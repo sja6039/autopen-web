@@ -1,11 +1,11 @@
-@import 'tailwindcss';
+@import "tailwindcss";
 
 /* Prevent ALL text selection / callouts across the entire app.
    Apple Pencil lift/place events can trigger iOS share & copy popups. */
 html,
 body {
   -webkit-user-select: none;
-  -webkit-touch-callout: none;   /* kills the iOS share/copy callout */
+  -webkit-touch-callout: none; /* kills the iOS share/copy callout */
   user-select: none;
   overscroll-behavior: none;
 }

@@ -1,39 +1,48 @@
-import React, { useRef, useEffect, useState } from 'react'
+import React, { useRef, useEffect, useState } from "react";
 
-type Point = { x: number; y: number }
+type Point = { x: number; y: number };
 
-export type Stroke = { points: Point[]; erase?: boolean }
+export type Stroke = { points: Point[]; erase?: boolean };
 
 export interface Drawing {
-  strokes: Stroke[]
-  canvasWidth?: number
-  canvasHeight?: number
+  strokes: Stroke[];
+  canvasWidth?: number;
+  canvasHeight?: number;
 }
 
 interface DrawingPadProps {
-  value: Drawing | null
-  onChange: (drawing: Drawing | null) => void
-  className?: string
-  height?: number
+  value: Drawing | null;
+  onChange: (drawing: Drawing | null) => void;
+  className?: string;
+  height?: number;
 }
 
 export function drawingToSvgPath(drawing: Drawing | null): string | null {
-  if (!drawing || drawing.strokes.length === 0) return null
-  const segments: string[] = []
+  if (!drawing || drawing.strokes.length === 0) return null;
+  const segments: string[] = [];
   for (const stroke of drawing.strokes) {
-    if (stroke.erase) continue
-    const { points } = stroke
-    if (points.length === 0) continue
-    const [first, ...rest] = points
-    segments.push(`M ${first.x} ${first.y}`)
-    for (const p of rest) segments.push(`L ${p.x} ${p.y}`)
+    if (stroke.erase) continue;
+    const { points } = stroke;
+    if (points.length === 0) continue;
+    segments.push(`M ${points[0].x} ${points[0].y}`);
+    for (let i = 1; i < points.length - 1; i++) {
+      const cp = points[i];
+      const next = points[i + 1];
+      const midX = (cp.x + next.x) / 2;
+      const midY = (cp.y + next.y) / 2;
+      segments.push(`Q ${cp.x} ${cp.y} ${midX} ${midY}`);
+    }
+    if (points.length > 1) {
+      const last = points[points.length - 1];
+      segments.push(`L ${last.x} ${last.y}`);
+    }
   }
-  return segments.length > 0 ? segments.join(' ') : null
+  return segments.length > 0 ? segments.join(" ") : null;
 }
 
 /** A draw group: strokes drawn together, optionally followed by erase strokes.
  *  The erase only applies to the draws within this group, not to later draws. */
-export type SvgGroup = { path: string; erasePath: string | null }
+export type SvgGroup = { path: string; erasePath: string | null };
 
 /** Returns groups of draw+erase strokes in full canvas coordinates, preserving temporal order.
  *  Each group's erase mask only cuts through its own draw strokes, so strokes drawn after
@@ -41,52 +50,68 @@ export type SvgGroup = { path: string; erasePath: string | null }
 export function drawingToSvg(
   drawing: Drawing | null,
 ): { groups: SvgGroup[]; width: number; height: number } | null {
-  if (!drawing || drawing.strokes.length === 0) return null
-  const w = drawing.canvasWidth ?? 1
-  const h = drawing.canvasHeight ?? 1
+  if (!drawing || drawing.strokes.length === 0) return null;
+  const w = drawing.canvasWidth ?? 1;
+  const h = drawing.canvasHeight ?? 1;
 
   const strokeToSegments = (strokes: Stroke[]): string => {
-    const segs: string[] = []
+    const segs: string[] = [];
     for (const { points } of strokes) {
-      if (points.length === 0) continue
-      const [first, ...rest] = points
-      segs.push(`M ${+(first.x * w).toFixed(3)} ${+(first.y * h).toFixed(3)}`)
-      for (const p of rest)
-        segs.push(`L ${+(p.x * w).toFixed(3)} ${+(p.y * h).toFixed(3)}`)
+      if (points.length === 0) continue;
+      const fx = +(points[0].x * w).toFixed(3);
+      const fy = +(points[0].y * h).toFixed(3);
+      segs.push(`M ${fx} ${fy}`);
+      for (let i = 1; i < points.length - 1; i++) {
+        const cp = points[i];
+        const next = points[i + 1];
+        const cpx = +(cp.x * w).toFixed(3);
+        const cpy = +(cp.y * h).toFixed(3);
+        const midX = +(((cp.x + next.x) / 2) * w).toFixed(3);
+        const midY = +(((cp.y + next.y) / 2) * h).toFixed(3);
+        segs.push(`Q ${cpx} ${cpy} ${midX} ${midY}`);
+      }
+      if (points.length > 1) {
+        const last = points[points.length - 1];
+        segs.push(`L ${+(last.x * w).toFixed(3)} ${+(last.y * h).toFixed(3)}`);
+      }
     }
-    return segs.join(' ')
-  }
+    return segs.join(" ");
+  };
 
-  const groups: SvgGroup[] = []
-  let currentDraws: Stroke[] = []
-  let currentErases: Stroke[] = []
-  let hasAnyDraw = false
+  const groups: SvgGroup[] = [];
+  let currentDraws: Stroke[] = [];
+  let currentErases: Stroke[] = [];
+  let hasAnyDraw = false;
 
   for (const stroke of drawing.strokes) {
     if (stroke.erase) {
-      currentErases.push(stroke)
+      currentErases.push(stroke);
     } else {
       // Switching from erase back to draw: finalize the previous group
       if (currentErases.length > 0 && currentDraws.length > 0) {
-        groups.push({ path: strokeToSegments(currentDraws), erasePath: strokeToSegments(currentErases) })
-        currentDraws = []
-        currentErases = []
+        groups.push({
+          path: strokeToSegments(currentDraws),
+          erasePath: strokeToSegments(currentErases),
+        });
+        currentDraws = [];
+        currentErases = [];
       }
-      currentDraws.push(stroke)
-      hasAnyDraw = true
+      currentDraws.push(stroke);
+      hasAnyDraw = true;
     }
   }
 
   if (currentDraws.length > 0) {
     groups.push({
       path: strokeToSegments(currentDraws),
-      erasePath: currentErases.length > 0 ? strokeToSegments(currentErases) : null,
-    })
+      erasePath:
+        currentErases.length > 0 ? strokeToSegments(currentErases) : null,
+    });
   }
 
-  if (!hasAnyDraw) return null
+  if (!hasAnyDraw) return null;
 
-  return { groups, width: w, height: h }
+  return { groups, width: w, height: h };
 }
 
 export const DrawingPad: React.FC<DrawingPadProps> = ({
@@ -95,80 +120,89 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
   className,
   height = 280,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // All mutable drawing state lives in refs so native event handlers
   // (which close over these refs once at mount) always see fresh values.
-  const activePointerRef  = useRef<number | null>(null)
-  const currentStrokeRef  = useRef<Stroke | null>(null)
-  const strokesRef        = useRef<Stroke[]>(value?.strokes ?? [])
-  const isErasingRef      = useRef(false)
+  const activePointerRef = useRef<number | null>(null);
+  const currentStrokeRef = useRef<Stroke | null>(null);
+  const strokesRef = useRef<Stroke[]>(value?.strokes ?? []);
+  const isErasingRef = useRef(false);
 
   // Keep onChange in a ref so the event-handler effect never needs to re-run
   // when the parent re-renders with a new callback reference.
-  const onChangeRef = useRef(onChange)
-  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+  const onChangeRef = useRef(onChange);
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   // A counter that tells React "please re-render and redraw the canvas now."
-  const [tick, setTick] = useState(0)
-  const bump = () => setTick((n) => n + 1)
+  const [tick, setTick] = useState(0);
+  const bump = () => setTick((n) => n + 1);
 
   // Eraser toggle (React state so the button re-renders)
-  const [isErasing, setIsErasing] = useState(false)
+  const [isErasing, setIsErasing] = useState(false);
   const toggleEraser = () => {
-    const next = !isErasingRef.current
-    isErasingRef.current = next
-    setIsErasing(next)
-  }
+    const next = !isErasingRef.current;
+    isErasingRef.current = next;
+    setIsErasing(next);
+  };
 
   // ── Sync external value into refs ──────────────────────────────────────────
   useEffect(() => {
-    strokesRef.current       = value?.strokes ?? []
-    currentStrokeRef.current = null
-    activePointerRef.current = null
-    bump()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value])
+    strokesRef.current = value?.strokes ?? [];
+    currentStrokeRef.current = null;
+    activePointerRef.current = null;
+    bump();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
 
   // ── Canvas redraw ───────────────────────────────────────────────────────────
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const dpr  = window.devicePixelRatio || 1
-    const rect = canvas.getBoundingClientRect()
-    canvas.width  = rect.width  * dpr
-    canvas.height = rect.height * dpr
-    ctx.scale(dpr, dpr)
-    ctx.clearRect(0, 0, rect.width, rect.height)
-    ctx.lineCap  = 'round'
-    ctx.lineJoin = 'round'
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
 
     const paint = (stroke: Stroke) => {
-      const { points, erase } = stroke
-      if (points.length < 2) return
-      ctx.save()
+      const { points, erase } = stroke;
+      if (points.length < 2) return;
+      ctx.save();
       if (erase) {
-        ctx.globalCompositeOperation = 'destination-out'
-        ctx.strokeStyle = 'rgba(0,0,0,1)'
-        ctx.lineWidth   = 24
+        ctx.globalCompositeOperation = "destination-out";
+        ctx.strokeStyle = "rgba(0,0,0,1)";
+        ctx.lineWidth = 24;
       } else {
-        ctx.globalCompositeOperation = 'source-over'
-        ctx.strokeStyle = '#1c1917'
-        ctx.lineWidth   = 2
+        ctx.globalCompositeOperation = "source-over";
+        ctx.strokeStyle = "#1c1917";
+        ctx.lineWidth = 2;
       }
-      ctx.beginPath()
-      ctx.moveTo(points[0].x * rect.width, points[0].y * rect.height)
-      for (let i = 1; i < points.length; i++)
-        ctx.lineTo(points[i].x * rect.width, points[i].y * rect.height)
-      ctx.stroke()
-      ctx.restore()
-    }
+      ctx.beginPath();
+      ctx.moveTo(points[0].x * rect.width, points[0].y * rect.height);
+      for (let i = 1; i < points.length - 1; i++) {
+        const cp = points[i];
+        const next = points[i + 1];
+        const midX = ((cp.x + next.x) / 2) * rect.width;
+        const midY = ((cp.y + next.y) / 2) * rect.height;
+        ctx.quadraticCurveTo(cp.x * rect.width, cp.y * rect.height, midX, midY);
+      }
+      const last = points[points.length - 1];
+      ctx.lineTo(last.x * rect.width, last.y * rect.height);
+      ctx.stroke();
+      ctx.restore();
+    };
 
-    strokesRef.current.forEach(paint)
-    if (currentStrokeRef.current) paint(currentStrokeRef.current)
-  }, [tick])
+    strokesRef.current.forEach(paint);
+    if (currentStrokeRef.current) paint(currentStrokeRef.current);
+  }, [tick]);
 
   // ── Native event listeners (registered once at mount) ──────────────────────
   //
@@ -178,160 +212,191 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
   // with { passive: false } so preventDefault() actually works and stops
   // Safari from showing its "Share…" popup on pen-down.
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
     // Helper: extract a normalised point from any PointerEvent
     const pt = (e: PointerEvent): Point | null => {
-      const r = canvas.getBoundingClientRect()
-      if (!r.width || !r.height) return null
-      return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }
-    }
+      const r = canvas.getBoundingClientRect();
+      if (!r.width || !r.height) return null;
+      return {
+        x: (e.clientX - r.left) / r.width,
+        y: (e.clientY - r.top) / r.height,
+      };
+    };
 
     // Save the in-progress stroke to the committed list and notify parent.
     const commit = () => {
-      const stroke = currentStrokeRef.current
-      currentStrokeRef.current = null
+      const stroke = currentStrokeRef.current;
+      currentStrokeRef.current = null;
       if (stroke && stroke.points.length >= 2) {
-        const next = [...strokesRef.current, stroke]
-        strokesRef.current = next
-        const r = canvas.getBoundingClientRect()
-        onChangeRef.current({ strokes: next, canvasWidth: r.width, canvasHeight: r.height })
+        const next = [...strokesRef.current, stroke];
+        strokesRef.current = next;
+        const r = canvas.getBoundingClientRect();
+        onChangeRef.current({
+          strokes: next,
+          canvasWidth: r.width,
+          canvasHeight: r.height,
+        });
       }
-      setTick((n) => n + 1)
-    }
+      setTick((n) => n + 1);
+    };
 
     // ── pointerdown ─────────────────────────────────────────────────────────
     const onDown = (e: PointerEvent) => {
       // Only Apple Pencil ('pen') or mouse. Ignore finger touches — this
       // gives natural palm rejection.
-      if (e.pointerType !== 'pen' && e.pointerType !== 'mouse') return
+      if (e.pointerType !== "pen" && e.pointerType !== "mouse") return;
 
       // This preventDefault() MUST be reachable — it stops Safari from
       // interpreting pen-down as a long-press / "Share…" gesture.
-      e.preventDefault()
+      e.preventDefault();
 
-      if (activePointerRef.current !== null) return // already drawing
-      activePointerRef.current = e.pointerId
+      if (activePointerRef.current !== null) return; // already drawing
+      activePointerRef.current = e.pointerId;
 
       // setPointerCapture keeps pointermove/pointerup bound to this canvas
       // even if the pencil drifts outside its bounds.
-      canvas.setPointerCapture(e.pointerId)
+      canvas.setPointerCapture(e.pointerId);
 
-      const p = pt(e)
-      if (!p) return
-      currentStrokeRef.current = { points: [p], erase: isErasingRef.current }
-      setTick((n) => n + 1)
-    }
+      const p = pt(e);
+      if (!p) return;
+      currentStrokeRef.current = { points: [p], erase: isErasingRef.current };
+      setTick((n) => n + 1);
+    };
 
     // ── pointermove ─────────────────────────────────────────────────────────
     const onMove = (e: PointerEvent) => {
-      if (e.pointerId !== activePointerRef.current) return
-      e.preventDefault()
+      if (e.pointerId !== activePointerRef.current) return;
+      e.preventDefault();
 
       // getCoalescedEvents() recovers intermediate points that the browser
       // batched together during fast strokes — critical for Chrome on iPad.
       const events: PointerEvent[] =
-        typeof e.getCoalescedEvents === 'function' ? e.getCoalescedEvents() : [e]
+        typeof e.getCoalescedEvents === "function"
+          ? e.getCoalescedEvents()
+          : [e];
 
       for (const ce of events) {
-        const p = pt(ce)
-        if (!p) continue
-        const cur = currentStrokeRef.current
-        if (cur) currentStrokeRef.current = { ...cur, points: [...cur.points, p] }
+        const p = pt(ce);
+        if (!p) continue;
+        const cur = currentStrokeRef.current;
+        if (cur)
+          currentStrokeRef.current = { ...cur, points: [...cur.points, p] };
       }
-      setTick((n) => n + 1)
-    }
+      setTick((n) => n + 1);
+    };
 
     // ── pointerup ───────────────────────────────────────────────────────────
     const onUp = (e: PointerEvent) => {
-      if (e.pointerId !== activePointerRef.current) return
-      e.preventDefault()
-      activePointerRef.current = null
-      try { canvas.releasePointerCapture(e.pointerId) } catch { /* ok */ }
-      commit()
-    }
+      if (e.pointerId !== activePointerRef.current) return;
+      e.preventDefault();
+      activePointerRef.current = null;
+      try {
+        canvas.releasePointerCapture(e.pointerId);
+      } catch {
+        /* ok */
+      }
+      commit();
+    };
 
     // ── pointercancel ───────────────────────────────────────────────────────
     // Fires when iOS takes over the gesture (Control Centre swipe, etc.).
     // Save what we have rather than losing the stroke.
     const onCancel = (e: PointerEvent) => {
-      if (e.pointerId !== activePointerRef.current) return
-      activePointerRef.current = null
-      commit()
-    }
+      if (e.pointerId !== activePointerRef.current) return;
+      activePointerRef.current = null;
+      commit();
+    };
 
     // ── pointerleave ────────────────────────────────────────────────────────
     // Safety net: if pointerup didn't fire (iOS quirk), pressure drops to 0
     // as the pencil truly lifts — commit the stroke then.
     const onLeave = (e: PointerEvent) => {
-      if (e.pointerId !== activePointerRef.current) return
-      if (e.pressure > 0) return // still touching, just moved outside
-      activePointerRef.current = null
-      commit()
-    }
+      if (e.pointerId !== activePointerRef.current) return;
+      if (e.pressure > 0) return; // still touching, just moved outside
+      activePointerRef.current = null;
+      commit();
+    };
 
     // ── touchstart / touchmove ──────────────────────────────────────────────
     // Some WebKit versions still route pen input through touch events before
     // pointer events. Preventing default here is the last line of defence
     // against the Safari share popup and scroll hijacking.
-    const blockTouch = (e: TouchEvent) => { e.preventDefault() }
+    const blockTouch = (e: TouchEvent) => {
+      e.preventDefault();
+    };
 
     // ── contextmenu ─────────────────────────────────────────────────────────
-    const blockContext = (e: Event) => { e.preventDefault() }
+    const blockContext = (e: Event) => {
+      e.preventDefault();
+    };
 
     // ALL listeners use { passive: false } — without this, preventDefault()
     // is silently ignored by WebKit for touch-related events.
-    const opts: AddEventListenerOptions = { passive: false }
+    const opts: AddEventListenerOptions = { passive: false };
 
-    canvas.addEventListener('pointerdown',   onDown,       opts)
-    canvas.addEventListener('pointermove',   onMove,       opts)
-    canvas.addEventListener('pointerup',     onUp,         opts)
-    canvas.addEventListener('pointercancel', onCancel,     opts)
-    canvas.addEventListener('pointerleave',  onLeave,      opts)
-    canvas.addEventListener('touchstart',    blockTouch,   opts)
-    canvas.addEventListener('touchmove',     blockTouch,   opts)
-    canvas.addEventListener('contextmenu',   blockContext)
+    canvas.addEventListener("pointerdown", onDown, opts);
+    canvas.addEventListener("pointermove", onMove, opts);
+    canvas.addEventListener("pointerup", onUp, opts);
+    canvas.addEventListener("pointercancel", onCancel, opts);
+    canvas.addEventListener("pointerleave", onLeave, opts);
+    canvas.addEventListener("touchstart", blockTouch, opts);
+    canvas.addEventListener("touchmove", blockTouch, opts);
+    canvas.addEventListener("contextmenu", blockContext);
 
     return () => {
-      canvas.removeEventListener('pointerdown',   onDown)
-      canvas.removeEventListener('pointermove',   onMove)
-      canvas.removeEventListener('pointerup',     onUp)
-      canvas.removeEventListener('pointercancel', onCancel)
-      canvas.removeEventListener('pointerleave',  onLeave)
-      canvas.removeEventListener('touchstart',    blockTouch)
-      canvas.removeEventListener('touchmove',     blockTouch)
-      canvas.removeEventListener('contextmenu',   blockContext)
-    }
-  }, []) // Empty deps — all mutable state goes through refs, not closures
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onCancel);
+      canvas.removeEventListener("pointerleave", onLeave);
+      canvas.removeEventListener("touchstart", blockTouch);
+      canvas.removeEventListener("touchmove", blockTouch);
+      canvas.removeEventListener("contextmenu", blockContext);
+    };
+  }, []); // Empty deps — all mutable state goes through refs, not closures
 
   // ── Clear ───────────────────────────────────────────────────────────────────
   const handleClear = () => {
-    strokesRef.current       = []
-    currentStrokeRef.current = null
-    activePointerRef.current = null
-    onChangeRef.current(null)
-    bump()
-  }
+    strokesRef.current = [];
+    currentStrokeRef.current = null;
+    activePointerRef.current = null;
+    onChangeRef.current(null);
+    bump();
+  };
 
-  const empty = strokesRef.current.length === 0 && !currentStrokeRef.current
+  const empty = strokesRef.current.length === 0 && !currentStrokeRef.current;
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className={className}>
       <div
         className="flex w-full rounded-2xl overflow-hidden border border-stone-200"
-        style={{ touchAction: 'none' }}
+        style={{ touchAction: "none" }}
       >
         {/* ── Canvas ── */}
         <div className="relative flex-1 bg-white">
           {empty && (
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
               <div className="flex flex-col items-center gap-2 opacity-20">
-                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z" />
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"
+                  />
                 </svg>
-                <span className="text-xs text-stone-400 font-medium">Draw here</span>
+                <span className="text-xs text-stone-400 font-medium">
+                  Draw here
+                </span>
               </div>
             </div>
           )}
@@ -340,32 +405,33 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
           <canvas
             ref={canvasRef}
             style={{
-              display: 'block',
-              width: '100%',
+              display: "block",
+              width: "100%",
               height: `${height}px`,
-              cursor: isErasing ? 'cell' : 'crosshair',
-              touchAction: 'none',
-              userSelect: 'none',
-              WebkitUserSelect: 'none',
+              cursor: isErasing ? "cell" : "crosshair",
+              touchAction: "none",
+              userSelect: "none",
+              WebkitUserSelect: "none",
             }}
           />
         </div>
-
       </div>
 
       <div className="mt-2 flex justify-between items-center px-1">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-stone-400">Apple Pencil · palm ignored</span>
+          <span className="text-xs text-stone-400">
+            Apple Pencil · palm ignored
+          </span>
           <button
             type="button"
             onClick={toggleEraser}
             className={`text-xs font-medium px-2 py-1 rounded-lg transition-colors ${
               isErasing
-                ? 'bg-stone-800 text-white'
-                : 'text-stone-400 hover:text-stone-700 hover:bg-stone-100'
+                ? "bg-stone-800 text-white"
+                : "text-stone-400 hover:text-stone-700 hover:bg-stone-100"
             }`}
           >
-            {isErasing ? 'Erasing' : 'Eraser'}
+            {isErasing ? "Erasing" : "Eraser"}
           </button>
         </div>
         <button
@@ -378,5 +444,5 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
         </button>
       </div>
     </div>
-  )
-}
+  );
+};
