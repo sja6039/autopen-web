@@ -17,36 +17,135 @@ interface DrawingPadProps {
   height?: number;
 }
 
+// Converts a point array to a smooth SVG path using Catmull-Rom cubic bezier splines.
+// The curve passes through every original point, so no pen position is lost or rounded away.
+// sx/sy are the x and y scale factors (canvas width and height in the target coordinate space).
+function pointsToSvgPath(points: Point[], sx: number, sy: number): string {
+  if (points.length === 0) return "";
+  const px = (p: Point) => +(p.x * sx).toFixed(3);
+  const py = (p: Point) => +(p.y * sy).toFixed(3);
+
+  if (points.length === 1) {
+    // Dot (tap/period/i-dot): a near-zero-length line renders as a circle with round linecap.
+    return `M ${px(points[0])} ${py(points[0])} l 0.001 0`;
+  }
+  if (points.length === 2) {
+    return `M ${px(points[0])} ${py(points[0])} L ${px(points[1])} ${py(points[1])}`;
+  }
+
+  const n = points.length;
+  let d = `M ${px(points[0])} ${py(points[0])}`;
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = points[Math.max(i - 1, 0)];
+    const p1 = points[i];
+    const p2 = points[i + 1];
+    const p3 = points[Math.min(i + 2, n - 1)];
+    // Catmull-Rom → cubic bezier control points (alpha = 0.5 tension)
+    const cp1x = +((p1.x + (p2.x - p0.x) / 6) * sx).toFixed(3);
+    const cp1y = +((p1.y + (p2.y - p0.y) / 6) * sy).toFixed(3);
+    const cp2x = +((p2.x - (p3.x - p1.x) / 6) * sx).toFixed(3);
+    const cp2y = +((p2.y - (p3.y - p1.y) / 6) * sy).toFixed(3);
+    d += ` C ${cp1x} ${cp1y} ${cp2x} ${cp2y} ${px(p2)} ${py(p2)}`;
+  }
+  return d;
+}
+
 export function drawingToSvgPath(drawing: Drawing | null): string | null {
   if (!drawing || drawing.strokes.length === 0) return null;
   const segments: string[] = [];
   for (const stroke of drawing.strokes) {
     if (stroke.erase) continue;
-    const { points } = stroke;
-    if (points.length === 0) continue;
-    segments.push(`M ${points[0].x} ${points[0].y}`);
-    for (let i = 1; i < points.length - 1; i++) {
-      const cp = points[i];
-      const next = points[i + 1];
-      const midX = (cp.x + next.x) / 2;
-      const midY = (cp.y + next.y) / 2;
-      segments.push(`Q ${cp.x} ${cp.y} ${midX} ${midY}`);
-    }
-    if (points.length > 1) {
-      const last = points[points.length - 1];
-      segments.push(`L ${last.x} ${last.y}`);
-    }
+    const path = pointsToSvgPath(stroke.points, 1, 1);
+    if (path) segments.push(path);
   }
   return segments.length > 0 ? segments.join(" ") : null;
 }
 
-/** A draw group: strokes drawn together, optionally followed by erase strokes.
- *  The erase only applies to the draws within this group, not to later draws. */
 export type SvgGroup = { path: string; erasePath: string | null };
 
-/** Returns groups of draw+erase strokes in full canvas coordinates, preserving temporal order.
- *  Each group's erase mask only cuts through its own draw strokes, so strokes drawn after
- *  an erase are never affected by that erase. viewBox is always "0 0 width height". */
+// ── Geometric erase helpers ────────────────────────────────────────────────────
+
+function distToSegmentPx(
+  px: number,
+  py: number,
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq === 0) return Math.hypot(px - ax, py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+function isPointErased(
+  nx: number,
+  ny: number,
+  eraseStrokes: Stroke[],
+  cw: number,
+  ch: number,
+  radiusPx: number,
+): boolean {
+  const ppx = nx * cw;
+  const ppy = ny * ch;
+  for (const { points } of eraseStrokes) {
+    if (points.length === 0) continue;
+    if (points.length === 1) {
+      if (
+        Math.hypot(ppx - points[0].x * cw, ppy - points[0].y * ch) <= radiusPx
+      )
+        return true;
+      continue;
+    }
+    for (let i = 0; i < points.length - 1; i++) {
+      if (
+        distToSegmentPx(
+          ppx,
+          ppy,
+          points[i].x * cw,
+          points[i].y * ch,
+          points[i + 1].x * cw,
+          points[i + 1].y * ch,
+        ) <= radiusPx
+      )
+        return true;
+    }
+  }
+  return false;
+}
+
+// Removes erased portions from a single draw stroke by splitting it into
+// sub-strokes wherever the pen passes through an erased region.
+function applyErases(
+  drawStroke: Stroke,
+  eraseStrokes: Stroke[],
+  cw: number,
+  ch: number,
+): Stroke[] {
+  const ERASE_RADIUS_PX = 12; // half of the 24px erase lineWidth used on canvas
+  const result: Stroke[] = [];
+  let current: Point[] = [];
+  for (const pt of drawStroke.points) {
+    if (isPointErased(pt.x, pt.y, eraseStrokes, cw, ch, ERASE_RADIUS_PX)) {
+      if (current.length > 0) {
+        result.push({ points: current });
+        current = [];
+      }
+    } else {
+      current.push(pt);
+    }
+  }
+  if (current.length > 0) result.push({ points: current });
+  return result;
+}
+
+/** Converts a Drawing to SVG-ready data, resolving erases geometrically so the
+ *  output contains only the lines that should actually be drawn — no masks, no
+ *  hidden paths. Erased content is physically absent from the path data, which
+ *  means gcode converters and other consumers see exactly what was intended. */
 export function drawingToSvg(
   drawing: Drawing | null,
 ): { groups: SvgGroup[]; width: number; height: number } | null {
@@ -54,64 +153,40 @@ export function drawingToSvg(
   const w = drawing.canvasWidth ?? 1;
   const h = drawing.canvasHeight ?? 1;
 
-  const strokeToSegments = (strokes: Stroke[]): string => {
-    const segs: string[] = [];
-    for (const { points } of strokes) {
-      if (points.length === 0) continue;
-      const fx = +(points[0].x * w).toFixed(3);
-      const fy = +(points[0].y * h).toFixed(3);
-      segs.push(`M ${fx} ${fy}`);
-      for (let i = 1; i < points.length - 1; i++) {
-        const cp = points[i];
-        const next = points[i + 1];
-        const cpx = +(cp.x * w).toFixed(3);
-        const cpy = +(cp.y * h).toFixed(3);
-        const midX = +(((cp.x + next.x) / 2) * w).toFixed(3);
-        const midY = +(((cp.y + next.y) / 2) * h).toFixed(3);
-        segs.push(`Q ${cpx} ${cpy} ${midX} ${midY}`);
-      }
-      if (points.length > 1) {
-        const last = points[points.length - 1];
-        segs.push(`L ${+(last.x * w).toFixed(3)} ${+(last.y * h).toFixed(3)}`);
-      }
-    }
-    return segs.join(" ");
-  };
+  const finalStrokes: Stroke[] = [];
+  let pendingDraws: Stroke[] = [];
+  let pendingErases: Stroke[] = [];
 
-  const groups: SvgGroup[] = [];
-  let currentDraws: Stroke[] = [];
-  let currentErases: Stroke[] = [];
-  let hasAnyDraw = false;
+  const flush = () => {
+    if (pendingErases.length > 0) {
+      for (const draw of pendingDraws)
+        finalStrokes.push(...applyErases(draw, pendingErases, w, h));
+    } else {
+      finalStrokes.push(...pendingDraws);
+    }
+    pendingDraws = [];
+    pendingErases = [];
+  };
 
   for (const stroke of drawing.strokes) {
     if (stroke.erase) {
-      currentErases.push(stroke);
+      pendingErases.push(stroke);
     } else {
-      // Switching from erase back to draw: finalize the previous group
-      if (currentErases.length > 0 && currentDraws.length > 0) {
-        groups.push({
-          path: strokeToSegments(currentDraws),
-          erasePath: strokeToSegments(currentErases),
-        });
-        currentDraws = [];
-        currentErases = [];
-      }
-      currentDraws.push(stroke);
-      hasAnyDraw = true;
+      // Erase group is complete — apply it to the draws that preceded it.
+      if (pendingErases.length > 0 && pendingDraws.length > 0) flush();
+      pendingDraws.push(stroke);
     }
   }
+  flush();
 
-  if (currentDraws.length > 0) {
-    groups.push({
-      path: strokeToSegments(currentDraws),
-      erasePath:
-        currentErases.length > 0 ? strokeToSegments(currentErases) : null,
-    });
-  }
+  const path = finalStrokes
+    .map((s) => pointsToSvgPath(s.points, w, h))
+    .filter(Boolean)
+    .join(" ");
 
-  if (!hasAnyDraw) return null;
+  if (!path) return null;
 
-  return { groups, width: w, height: h };
+  return { groups: [{ path, erasePath: null }], width: w, height: h };
 }
 
 export const DrawingPad: React.FC<DrawingPadProps> = ({
@@ -174,28 +249,58 @@ export const DrawingPad: React.FC<DrawingPadProps> = ({
 
     const paint = (stroke: Stroke) => {
       const { points, erase } = stroke;
-      if (points.length < 2) return;
+      if (points.length === 0) return;
+      const lw = erase ? 24 : 2;
       ctx.save();
       if (erase) {
         ctx.globalCompositeOperation = "destination-out";
         ctx.strokeStyle = "rgba(0,0,0,1)";
-        ctx.lineWidth = 24;
       } else {
         ctx.globalCompositeOperation = "source-over";
         ctx.strokeStyle = "#1c1917";
-        ctx.lineWidth = 2;
       }
+      ctx.lineWidth = lw;
+
+      if (points.length === 1) {
+        // Single-point tap: render as a filled circle (dot)
+        ctx.beginPath();
+        ctx.arc(
+          points[0].x * rect.width,
+          points[0].y * rect.height,
+          lw / 2,
+          0,
+          Math.PI * 2,
+        );
+        ctx.fillStyle = erase ? "rgba(0,0,0,1)" : "#1c1917";
+        ctx.fill();
+        ctx.restore();
+        return;
+      }
+
+      // Catmull-Rom cubic bezier — passes through every recorded point
+      const n = points.length;
+      const W = rect.width;
+      const H = rect.height;
       ctx.beginPath();
-      ctx.moveTo(points[0].x * rect.width, points[0].y * rect.height);
-      for (let i = 1; i < points.length - 1; i++) {
-        const cp = points[i];
-        const next = points[i + 1];
-        const midX = ((cp.x + next.x) / 2) * rect.width;
-        const midY = ((cp.y + next.y) / 2) * rect.height;
-        ctx.quadraticCurveTo(cp.x * rect.width, cp.y * rect.height, midX, midY);
+      ctx.moveTo(points[0].x * W, points[0].y * H);
+      if (n === 2) {
+        ctx.lineTo(points[1].x * W, points[1].y * H);
+      } else {
+        for (let i = 0; i < n - 1; i++) {
+          const p0 = points[Math.max(i - 1, 0)];
+          const p1 = points[i];
+          const p2 = points[i + 1];
+          const p3 = points[Math.min(i + 2, n - 1)];
+          ctx.bezierCurveTo(
+            (p1.x + (p2.x - p0.x) / 6) * W,
+            (p1.y + (p2.y - p0.y) / 6) * H,
+            (p2.x - (p3.x - p1.x) / 6) * W,
+            (p2.y - (p3.y - p1.y) / 6) * H,
+            p2.x * W,
+            p2.y * H,
+          );
+        }
       }
-      const last = points[points.length - 1];
-      ctx.lineTo(last.x * rect.width, last.y * rect.height);
       ctx.stroke();
       ctx.restore();
     };

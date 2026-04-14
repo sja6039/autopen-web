@@ -50,28 +50,18 @@ function createCardSvg(
     oy: number,
     w: number,
     h: number,
-    maskId: string,
+    _maskId: string,
     par: string,
   ) => {
     const result = drawingToSvg(drawing);
     if (!result) return "";
     const { groups, width: cw, height: ch } = result;
     const viewBox = `0 0 ${cw} ${ch}`;
-    const defs = groups
-      .filter((g) => g.erasePath)
-      .map(
-        (g, gi) =>
-          `<mask id="${maskId}_${gi}"><rect x="0" y="0" width="${cw}" height="${ch}" fill="white"/><path d="${g.erasePath}" fill="none" stroke="black" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/></mask>`,
-      );
-    let eraseIndex = 0;
-    const paths = groups.map((g) => {
-      if (g.erasePath) {
-        return `<path d="${g.path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" mask="url(#${maskId}_${eraseIndex++})" />`;
-      }
-      return `<path d="${g.path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />`;
-    });
-    const defsStr = defs.length > 0 ? `<defs>${defs.join("")}</defs>` : "";
-    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="${par}">${defsStr}${paths.join("")}</svg>`;
+    const paths = groups.map(
+      (g) =>
+        `<path d="${g.path}" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />`,
+    );
+    return `<svg x="${ox}" y="${oy}" width="${w}" height="${h}" viewBox="${viewBox}" preserveAspectRatio="${par}" overflow="visible">${paths.join("")}</svg>`;
   };
 
   // Scale each section up by DRAW_SCALE.
