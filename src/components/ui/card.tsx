@@ -1,3 +1,16 @@
+/**
+ * card.tsx — Composable card layout primitives.
+ *
+ * Typical usage:
+ *   <Card>
+ *     <CardHeader>
+ *       <CardTitle>Title</CardTitle>
+ *     </CardHeader>
+ *     <CardContent>…</CardContent>
+ *   </Card>
+ *
+ * All components forward their ref and accept any standard div/heading props.
+ */
 import * as React from "react";
 import { cn } from "@/lib/utils";
 

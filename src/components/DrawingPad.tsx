@@ -1,19 +1,75 @@
+/**
+ * DrawingPad.tsx — Apple Pencil / mouse canvas drawing component.
+ *
+ * Overview
+ * --------
+ * Captures pointer events on an HTML <canvas>, converts them to normalised
+ * point arrays (0–1 range), and emits a `Drawing` value via `onChange`.
+ * Points are stored in canvas-normalised coordinates so the drawing scales
+ * correctly when the canvas is resized or the SVG is placed at a different
+ * size.
+ *
+ * Rendering
+ * ---------
+ * All strokes are painted using Catmull-Rom cubic bezier splines, which pass
+ * through every recorded point — no pen position is approximated or smoothed
+ * away. The same math is used for both the live canvas preview and the final
+ * SVG export, so what you see is exactly what the plotter receives.
+ *
+ * Erasing
+ * -------
+ * Erase strokes are stored alongside draw strokes in the same array (marked
+ * `erase: true`). On canvas they use `destination-out` compositing. For SVG
+ * export, `drawingToSvg()` resolves erases geometrically — splitting draw
+ * strokes wherever they intersect an erase region — so the output contains
+ * only the lines that should actually be plotted, with no hidden paths or
+ * mask elements.
+ *
+ * Event handling
+ * --------------
+ * All pointer/touch listeners are registered via native addEventListener with
+ * `{ passive: false }` rather than React's synthetic events. This is required
+ * because React attaches synthetic listeners as passive by default in WebKit,
+ * which silently ignores e.preventDefault() and causes Safari to show its
+ * "Share…" / long-press popup on Apple Pencil input.
+ *
+ * Palm rejection
+ * --------------
+ * Only `pointerType === "pen"` and `pointerType === "mouse"` events are
+ * processed. Touch (finger) events are blocked entirely, giving natural palm
+ * rejection with no configuration required.
+ */
 import React, { useRef, useEffect, useState } from "react";
 
+/** Normalised 2-D point. x and y are in [0, 1] relative to the canvas size. */
 type Point = { x: number; y: number };
 
+/**
+ * A single continuous stroke recorded from one pen-down → pen-up sequence.
+ * `erase: true` marks strokes drawn with the eraser tool.
+ */
 export type Stroke = { points: Point[]; erase?: boolean };
 
+/**
+ * The full drawing state emitted by DrawingPad via `onChange`.
+ * `canvasWidth` / `canvasHeight` record the pixel dimensions of the canvas at
+ * the time the drawing was captured — needed to scale erase radii correctly
+ * when converting to SVG coordinates.
+ */
 export interface Drawing {
   strokes: Stroke[];
   canvasWidth?: number;
   canvasHeight?: number;
 }
 
+/** Props accepted by the DrawingPad component. */
 interface DrawingPadProps {
+  /** Current drawing value (controlled). Pass null for an empty canvas. */
   value: Drawing | null;
+  /** Called whenever a stroke is committed or the canvas is cleared. */
   onChange: (drawing: Drawing | null) => void;
   className?: string;
+  /** Canvas display height in CSS pixels (default 280). */
   height?: number;
 }
 
@@ -50,6 +106,12 @@ function pointsToSvgPath(points: Point[], sx: number, sy: number): string {
   return d;
 }
 
+/**
+ * Converts a Drawing to a single SVG path string using a 1×1 coordinate
+ * space (i.e. scale factors of 1). Erase strokes are skipped — the result
+ * does NOT apply erases geometrically. Use `drawingToSvg()` instead when
+ * you need a plotter-ready output with erases resolved.
+ */
 export function drawingToSvgPath(drawing: Drawing | null): string | null {
   if (!drawing || drawing.strokes.length === 0) return null;
   const segments: string[] = [];
@@ -61,10 +123,17 @@ export function drawingToSvgPath(drawing: Drawing | null): string | null {
   return segments.length > 0 ? segments.join(" ") : null;
 }
 
+/** One group of SVG path data. erasePath is always null in the current output
+ *  (erases are resolved into the path itself) but the field is kept for
+ *  forward compatibility with mask-based approaches. */
 export type SvgGroup = { path: string; erasePath: string | null };
 
 // ── Geometric erase helpers ────────────────────────────────────────────────────
 
+/**
+ * Returns the distance in pixels from point (px, py) to the line segment
+ * from (ax, ay) to (bx, by). All values are in canvas pixel space.
+ */
 function distToSegmentPx(
   px: number,
   py: number,

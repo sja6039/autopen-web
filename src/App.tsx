@@ -1,3 +1,30 @@
+/**
+ * App.tsx — Root application component for Autopen.
+ *
+ * Autopen is a 5-step workflow for creating personalised handwritten greeting
+ * cards on an iPad with an Apple Pencil and sending them to a Raspberry Pi
+ * plotter over a Cloudflare tunnel.
+ *
+ * Workflow steps
+ * --------------
+ * 1. Count      – Choose how many cards to make (1–50).
+ * 2. Message    – Draw the base message shared by all cards.
+ * 3. Names      – For each card, draw a recipient name and an optional note.
+ * 4. Preview    – Review the generated cards; download as SVG / ZIP or share.
+ * 5. Print      – Pair with a Pi plotter via a 6-char code and send all cards.
+ *
+ * Card layout
+ * -----------
+ * Each card is a 5.5 × 4.3 inch SVG (550 × 430 internal units where 100 = 1 in).
+ * Three drawing sections are composited into the card, top to bottom:
+ *   · Name           – left-aligned, personal to each recipient
+ *   · Special note   – centered, optional per recipient
+ *   · Base message   – centered, identical on every card
+ *
+ * Each section is rendered at DRAW_SCALE (1.5×) its logical slot size so that
+ * handwriting appears at a comfortable reading size on the final printed card.
+ * Overflow is clipped at the card boundary by the outer SVG's viewBox.
+ */
 import React, { useMemo, useState, useEffect, useRef } from "react";
 import JSZip from "jszip";
 import { Button } from "@/components/ui/button";
@@ -12,33 +39,63 @@ import {
   type PiStatus,
 } from "@/services/piConnectionService";
 
+/**
+ * Per-card personalisation data.
+ * `name` and `specialMessage` are independent Drawing values that can each be
+ * null if the user left that section blank.
+ */
 type RecipientEntry = {
   name: Drawing | null;
   specialMessage: Drawing | null;
 };
 
+/** Maximum cards that can be created in one session. */
 const MAX_CARDS = 50;
-// 100 internal units = 1 inch → SVG outputs at exactly 5.5 × 4.3 in
+
+// ── Card coordinate system ────────────────────────────────────────────────────
+// 100 internal units = 1 inch → SVG outputs at exactly 5.5 × 4.3 in.
+// All layout constants below are in these internal units.
 const CARD_WIDTH = 550;
 const CARD_HEIGHT = 430;
-const CARD_MARGIN_X = CARD_WIDTH * 0.08;
-const CARD_MARGIN_Y = CARD_HEIGHT * 0.08;
+const CARD_MARGIN_X = CARD_WIDTH * 0.08;   // 8% horizontal gutter
+const CARD_MARGIN_Y = CARD_HEIGHT * 0.08;  // 8% vertical gutter
 const CARD_INNER_W = CARD_WIDTH - CARD_MARGIN_X * 2;
-const NAME_TOP = CARD_MARGIN_Y;
-// NAME_H and SPECIAL_H are sized so their canvas→card scale matches the
-// main message: 220px canvas / NAME_H ≈ 300px canvas / MESSAGE_H
-const NAME_H = CARD_HEIGHT * 0.2345; // ≈ 101 units
-const SPECIAL_TOP = NAME_TOP + NAME_H + CARD_HEIGHT * 0.02;
-const SPECIAL_H = CARD_HEIGHT * 0.2345;
-const MESSAGE_TOP = SPECIAL_TOP + SPECIAL_H + CARD_HEIGHT * 0.02;
-const MESSAGE_H = CARD_HEIGHT * 0.32;
 
-// Render each drawing section at DRAW_SCALE× its logical slot size so that
-// handwriting appears larger on the final card.  The outer card SVG clips any
-// overflow at the card boundary.  Centered sections stay centered; the name
-// section (top-left) expands rightward from the left margin.
+// ── Vertical layout of the three drawing sections ────────────────────────────
+const NAME_TOP = CARD_MARGIN_Y;
+// NAME_H and SPECIAL_H are proportioned so the canvas-px → card-unit scale
+// is consistent with the main message: 220px canvas / NAME_H ≈ 300px / MESSAGE_H.
+const NAME_H = CARD_HEIGHT * 0.2345;       // ≈ 101 units — recipient name row
+const SPECIAL_TOP = NAME_TOP + NAME_H + CARD_HEIGHT * 0.02;
+const SPECIAL_H = CARD_HEIGHT * 0.2345;    // ≈ 101 units — special note row
+const MESSAGE_TOP = SPECIAL_TOP + SPECIAL_H + CARD_HEIGHT * 0.02;
+const MESSAGE_H = CARD_HEIGHT * 0.32;      // ≈ 138 units — base message row
+
+// ── Drawing scale ─────────────────────────────────────────────────────────────
+// Each section is rendered at 1.5× its logical slot so handwriting appears
+// large and bold on the final print. The outer SVG viewBox clips any overflow.
+// Centered sections (special note, message) shift symmetrically; the name
+// section expands rightward from its left margin anchor.
 const DRAW_SCALE = 1.5;
 
+/**
+ * Builds the final SVG string for a single greeting card.
+ *
+ * The card is 5.5 × 4.3 inches (550 × 430 internal units). Three drawing
+ * sections are composited top-to-bottom:
+ *   1. Recipient name  — top-left, scaled right/down from the left margin
+ *   2. Special note    — centered, optional
+ *   3. Base message    — centered, shared across all cards
+ *
+ * Each section's <svg> is placed using x/y/width/height attributes and a
+ * viewBox derived from the canvas dimensions recorded in the Drawing. Setting
+ * overflow="visible" on the inner SVGs lets strokes bleed slightly past their
+ * slot boundary (they are ultimately clipped by the outer card viewBox).
+ *
+ * @param baseMessage  Drawing shared by every card (can be null → no stroke)
+ * @param recipient    Per-card name and special note
+ * @param index        0-based card index, written into data-card-index for debugging
+ */
 function createCardSvg(
   baseMessage: Drawing | null,
   recipient: RecipientEntry,
@@ -121,8 +178,16 @@ function createCardSvg(
 
 // ─── Progress bar ────────────────────────────────────────────────────────────
 
+/** Ordered labels for the 5 workflow steps, displayed in the top progress bar. */
 const STEP_LABELS = ["Count", "Message", "Names", "Export", "Print"];
 
+/**
+ * Horizontal step-progress indicator shown at the top of every step.
+ * Completed steps show a checkmark; the active step has a ring highlight;
+ * future steps are greyed out. Connecting lines fill violet as steps complete.
+ *
+ * @param current 1-based index of the currently active step.
+ */
 function StepProgress({ current }: { current: number }) {
   return (
     <div className="flex items-center w-full mb-8 px-1">
@@ -187,6 +252,7 @@ function StepProgress({ current }: { current: number }) {
 
 // ─── Section label ───────────────────────────────────────────────────────────
 
+/** Small uppercase label rendered above each drawing pad section. */
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
     <div className="text-xs font-bold uppercase tracking-widest text-stone-400 mb-2">
@@ -227,9 +293,20 @@ const App: React.FC = () => {
     };
   }, []);
 
+  // ── Workflow navigation ───────────────────────────────────────────────────
   const [step, setStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+
+  // ── Card configuration ────────────────────────────────────────────────────
+  /** Number of cards in this batch (1–50). */
   const [cardCount, setCardCount] = useState(4);
+  /** Drawing shared across all cards (Step 2). */
   const [baseMessage, setBaseMessage] = useState<Drawing | null>(null);
+  /**
+   * Fixed-length array of MAX_CARDS entries. Only the first `cardCount`
+   * entries are used. Allocated upfront so indices never shift when cardCount
+   * changes — a user can safely increase the count and their existing entries
+   * remain at the same positions.
+   */
   const [recipients, setRecipients] = useState<RecipientEntry[]>(
     () =>
       Array.from({ length: MAX_CARDS }, () => ({
@@ -237,20 +314,41 @@ const App: React.FC = () => {
         specialMessage: null,
       })) as RecipientEntry[],
   );
+  /** 0-based index of the card currently being edited in Step 3. */
   const [activeRecipientIndex, setActiveRecipientIndex] = useState(0);
 
   // ── Pi printer state ──────────────────────────────────────────────────────
+  /** The 6-character pairing code typed by the user on Step 5. */
   const [piCode, setPiCode] = useState("");
+  /**
+   * Connection lifecycle:
+   *   idle       – no connection attempted yet (or after disconnect)
+   *   connecting – ntfy.sh lookup + health ping in progress
+   *   connected  – tunnel URL stored; status polling is active
+   *   error      – last connect attempt failed (see piConnectError)
+   */
   const [piConnectState, setPiConnectState] = useState<
     "idle" | "connecting" | "connected" | "error"
   >("idle");
+  /** Human-readable error message when piConnectState === "error". */
   const [piConnectError, setPiConnectError] = useState("");
+  /**
+   * Send lifecycle:
+   *   idle    – no send attempted
+   *   sending – batch send loop is running
+   *   done    – all cards sent successfully
+   *   error   – send failed mid-batch (see piSendError)
+   */
   const [piSendState, setPiSendState] = useState<
     "idle" | "sending" | "done" | "error"
   >("idle");
+  /** Current send progress: { sent: cardsTransferred, total: batchSize }. */
   const [piSendProgress, setPiSendProgress] = useState({ sent: 0, total: 0 });
+  /** Human-readable error message when piSendState === "error". */
   const [piSendError, setPiSendError] = useState("");
+  /** Latest status snapshot from the Pi, polled every 3 seconds while connected. */
   const [piStatus, setPiStatus] = useState<PiStatus | null>(null);
+  /** Ref holding the setInterval handle for the status poll loop. */
   const piPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Poll Pi status while connected
@@ -278,11 +376,13 @@ const App: React.FC = () => {
     };
   }, [piConnectState]);
 
+  /** Slice of the recipients array limited to the current cardCount. */
   const visibleRecipients = useMemo(
     () => recipients.slice(0, cardCount),
     [recipients, cardCount],
   );
 
+  /** Triggers a browser file download for a single card's SVG. */
   const handleDownloadSvg = (i: number) => {
     const svg = createCardSvg(baseMessage, visibleRecipients[i], i);
     const blob = new Blob([svg], { type: "image/svg+xml;charset=utf-8" });
@@ -296,6 +396,12 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  /**
+   * Invokes the native Web Share API (navigator.share) with all card SVGs as
+   * File attachments. Only available on iOS Safari and modern Android — the
+   * function alerts the user if the browser or device does not support file
+   * sharing, directing them to use the ZIP download instead.
+   */
   const handleShareAll = async () => {
     const nav = typeof navigator !== "undefined" ? (navigator as any) : null;
     const supportsFiles =
@@ -332,6 +438,10 @@ const App: React.FC = () => {
     }
   };
 
+  /**
+   * Generates a ZIP archive containing one SVG file per card and triggers a
+   * browser download of the archive. Uses JSZip to build the ZIP in-memory.
+   */
   const handleDownloadZip = async () => {
     const zip = new JSZip();
     visibleRecipients.forEach((recipient, i) => {
@@ -349,6 +459,14 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  /**
+   * Initiates the printer pairing sequence:
+   *   1. Calls `connect(piCode)` which looks up the Cloudflare tunnel URL via
+   *      ntfy.sh and pings the Pi's health endpoint.
+   *   2. On success, transitions piConnectState to "connected", which starts
+   *      the status-polling interval (see useEffect above).
+   *   3. On failure, stores the error message for display.
+   */
   const handlePiConnect = async () => {
     if (piCode.length !== 6) return;
     setPiConnectState("connecting");
@@ -364,6 +482,11 @@ const App: React.FC = () => {
     }
   };
 
+  /**
+   * Clears the active printer connection and resets all Pi-related UI state.
+   * The status-poll interval is stopped automatically by the piConnectState
+   * useEffect when it transitions away from "connected".
+   */
   const handlePiDisconnect = () => {
     disconnect();
     setPiConnectState("idle");
@@ -374,6 +497,16 @@ const App: React.FC = () => {
     setPiSendError("");
   };
 
+  /**
+   * Sends all cards to the connected printer one by one via `sendSvgBatch()`.
+   *
+   * Filenames are timestamped (YYYYMMDD_HHMMSS) so the Pi queue shows a
+   * human-readable order even if multiple batches arrive on the same day.
+   *
+   * After the batch completes (success or error), the connection is
+   * automatically cleared — the user must re-pair to send again. This prevents
+   * duplicate sends from a stale connection left open.
+   */
   const handlePiSendAll = async () => {
     setPiSendState("sending");
     setPiSendError("");

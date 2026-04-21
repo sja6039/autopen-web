@@ -1,3 +1,20 @@
+/**
+ * piConnectionService.ts — Raspberry Pi plotter connectivity layer.
+ *
+ * Connection flow:
+ *   1. The Pi advertises its Cloudflare tunnel URL on an ntfy.sh topic keyed
+ *      by the 6-character pairing code shown on its local display.
+ *   2. `connect(code)` looks up that topic, validates the URL, and pings the
+ *      Pi's /api/health endpoint to confirm reachability.
+ *   3. The tunnel URL is cached in `_tunnelUrl` so every subsequent call can
+ *      reach the correct Pi without re-entering the pairing code.
+ *   4. `disconnect()` clears the cache; the caller is responsible for
+ *      resetting any derived UI state.
+ *
+ * All network calls use AbortSignal.timeout() to prevent indefinite hangs.
+ */
+
+/** Module-level cache — stores the active Cloudflare tunnel URL after pairing. */
 let _tunnelUrl: string | null = null;
 
 /** Look up the Cloudflare tunnel URL for a 6-char code via ntfy.sh. */
@@ -59,6 +76,15 @@ export function getConnectedIp(): string | null {
   return _tunnelUrl;
 }
 
+/**
+ * Live status snapshot returned by the Pi's /api/status endpoint.
+ *
+ * status         – "idle" | "plotting" | other string from Pi firmware
+ * current_job    – filename of the SVG currently being plotted, or null
+ * queue          – filenames waiting to be plotted (in order)
+ * completed      – filenames that finished plotting this session
+ * total_received – cumulative count of SVGs received since the Pi started
+ */
 export interface PiStatus {
   status: string;
   current_job: string | null;

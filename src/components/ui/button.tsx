@@ -1,3 +1,18 @@
+/**
+ * button.tsx — Reusable Button component.
+ *
+ * Variants:
+ *   default   – filled violet (primary CTA)
+ *   outline   – white with stone border (secondary action)
+ *   ghost     – no background, subtle hover (tertiary / icon label)
+ *   secondary – light stone fill (neutral alternative to outline)
+ *
+ * Sizes:
+ *   sm      – 36px tall, compact padding
+ *   default – 44px tall (touch-friendly)
+ *   lg      – 48px tall (prominent CTA)
+ *   icon    – 44×44px square, no padding (icon-only buttons)
+ */
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
@@ -25,6 +40,11 @@ const sizes: Record<NonNullable<ButtonProps["size"]>, string> = {
   icon: "h-11 w-11 p-0",
 };
 
+/**
+ * Polymorphic button that forwards its ref and spreads all native button
+ * attributes. Defaults to variant="default" (violet fill) and size="default"
+ * (44px height). Pass `asChild` patterns via className overrides if needed.
+ */
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant = "default", size = "default", ...props }, ref) => {
     return (
